@@ -1,0 +1,48 @@
+services:
+  # Реляційна база даних PostgreSQL 18
+  postgres_db:
+    image: postgres:18
+    container_name: mysurvey_postgres
+    restart: always
+    environment:
+      POSTGRES_DB: surveydb
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: mysecretpassword
+      TZ: UTC
+      PGTZ: UTC
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql
+
+  # Документоорієнтована база даних MongoDB 8.0
+  mongodb:
+    image: mongo:8.0
+    container_name: mysurvey_mongo
+    restart: always
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: mongoadmin
+      MONGO_INITDB_ROOT_PASSWORD: mongosecretpassword
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+
+  # Мікросервіс SqlService
+  sql_service:
+    container_name: mysurvey_sql_service
+    build:
+      context: ./src
+      dockerfile: MySurveyApp.SqlService/Dockerfile
+    restart: always
+    ports:
+      - "5001:8080"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ConnectionStrings__Postgres=Host=postgres_db;Port=5432;Database=surveydb;Username=postgres;Password=mysecretpassword
+    depends_on:
+      - postgres_db
+
+volumes:
+  postgres_data:
+  mongo_data:

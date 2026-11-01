@@ -1,0 +1,11 @@
+<Solution>
+  <Folder Name="/Solution Items/">
+    <File Path="docker-compose.yml" />
+  </Folder>
+  <Folder Name="/src/">
+    <Project Path="src/MySurveyApp.ApiGateway/MySurveyApp.ApiGateway.csproj" />
+    <Project Path="src/MySurveyApp.NoSqlService/MySurveyApp.NoSqlService.csproj" />
+    <Project Path="src/MySurveyApp.Shared/MySurveyApp.Shared.csproj" />
+    <Project Path="src/MySurveyApp.SqlService/MySurveyApp.SqlService.csproj" />
+  </Folder>
+</Solution>

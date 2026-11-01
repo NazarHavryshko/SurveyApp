@@ -1,0 +1,338 @@
+  
+=== F:\University\MySurveyApp\src\MySurveyApp.SqlService\Models\Hobby.cs ===  
+﻿using Microsoft.EntityFrameworkCore;
+using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema;
+
+namespace MySurveyApp.SqlService.Models
+{
+    [Table("hobby")]
+    [Index(nameof(HobbyName), IsUnique = true)]
+    public class Hobby
+    {
+        [Key]
+        [DatabaseGenerated(DatabaseGeneratedOption.Identity)]
+        [Column("hobby_id")]
+        public int HobbyId { get; set; }
+
+        [Required]
+        [MaxLength(100)]
+        [Column("hobby_name")]
+        public string HobbyName { get; set; } = string.Empty;
+    }
+
+}
+  
+=== F:\University\MySurveyApp\src\MySurveyApp.SqlService\Models\Occupation.cs ===  
+﻿using Microsoft.EntityFrameworkCore;
+using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema;
+
+namespace MySurveyApp.SqlService.Models
+{
+
+    [Table("occupation")]
+    [Index(nameof(OccupationName), IsUnique = true)]
+    public class Occupation
+    {
+        [Key]
+        [DatabaseGenerated(DatabaseGeneratedOption.Identity)]
+        [Column("occupation_id")]
+        public int OccupationId { get; set; }
+
+        [Required]
+        [MaxLength(100)]
+        [Column("occupation_name")]
+        public string OccupationName { get; set; } = string.Empty;
+
+        [Column("occ_domain_id")]
+        public int DomainId { get; set; }
+
+
+        [ForeignKey(nameof(DomainId))]
+        public virtual OccupationDomain? OccupationDomain { get; set; }
+    }
+}
+  
+=== F:\University\MySurveyApp\src\MySurveyApp.SqlService\Models\OccupationDomain.cs ===  
+﻿using Microsoft.EntityFrameworkCore;
+using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema;
+
+namespace MySurveyApp.SqlService.Models
+{
+
+    [Table("occ_domain_name")]
+    [Index(nameof(DomainName), IsUnique = true)]
+    public class OccupationDomain
+    {
+        [Key]
+        [DatabaseGenerated(DatabaseGeneratedOption.Identity)]
+        [Column("occ_domain_id")]
+        public int DomainId { get; set; }
+
+        [Required]
+        [MaxLength(100)]
+        [Column("occ_domain_name")]
+        public string DomainName { get; set; } = string.Empty;
+    }
+}
+  
+=== F:\University\MySurveyApp\src\MySurveyApp.SqlService\Models\Region.cs ===  
+﻿using Microsoft.EntityFrameworkCore;
+using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema;
+
+namespace MySurveyApp.SqlService.Models
+{
+    [Table("region")]
+    [Index(nameof(RegionName), IsUnique = true)]
+    public class Region
+    {
+        [Key]
+        [DatabaseGenerated(DatabaseGeneratedOption.Identity)]
+        [Column("region_id")]
+        public int RegionId { get; set; }
+
+        [Required]
+        [MaxLength(100)]
+        [Column("region_name")]
+        public string RegionName { get; set; } = string.Empty;
+    }
+}
+  
+=== F:\University\MySurveyApp\src\MySurveyApp.SqlService\Models\Survey.cs ===  
+﻿using Microsoft.EntityFrameworkCore;
+using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema;
+using MySurveyApp.Shared.Enums;
+
+namespace MySurveyApp.SqlService.Models
+{
+    
+    [Table("survey")]
+    public class Survey
+    {
+        [Key]
+        [DatabaseGenerated(DatabaseGeneratedOption.Identity)]
+        [Column("survey_id")]
+        public int SurveyId { get; set; }
+
+        [Required]
+        [MaxLength(500)]
+        [Column("survey_text ")]
+        public string SurveyText { get; set; } = string.Empty;
+
+        [Required]
+        [Column("survey_type")]
+        public SurveyType SurveyType { get; set; }
+
+        [Required]
+        [Column("region_id")]
+        public int? RegionId { get; set; }
+
+        [Required]
+        [Column("topic_id")]
+        public int TopicId { get; set; }
+
+        [Required]
+        [Column("author_id")]
+        public Guid AuthorId { get; set; }
+
+        [Required]
+        [Column("status")]
+        public SurveyStatus Status { get; set; }  = SurveyStatus.Pending;
+
+        [Required]
+        [Column("created_at")]
+        public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+
+        [Required]
+        [Column("expires_at")]
+        public DateTime ExpiresAt { get; set; }
+
+
+        [ForeignKey(nameof(RegionId))]
+        public virtual Region? Region { get; set; }
+
+        [ForeignKey(nameof(TopicId))]
+        public virtual SurveyTopic? SurveyTopic { get; set; }
+
+        [ForeignKey(nameof(AuthorId))]
+        public virtual User? Author { get; set; }
+
+    }
+}
+  
+=== F:\University\MySurveyApp\src\MySurveyApp.SqlService\Models\SurveyDomain.cs ===  
+﻿using Microsoft.EntityFrameworkCore;
+using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema;
+
+namespace MySurveyApp.SqlService.Models
+{
+    
+    [Table("survey_domain")]
+    [Index(nameof(DomainName), IsUnique = true)]
+    public class SurveyDomain
+    {
+        [Key]
+        [DatabaseGenerated(DatabaseGeneratedOption.Identity)]
+        [Column("domain_id")]
+        public int DomainId { get; set; }
+
+        [Required]
+        [MaxLength(100)]
+        [Column("domain_name")]
+        public string DomainName { get; set; } = string.Empty;
+    }
+}
+  
+=== F:\University\MySurveyApp\src\MySurveyApp.SqlService\Models\SurveyInteraction.cs ===  
+﻿using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema;
+
+namespace MySurveyApp.SqlService.Models
+{
+    [Table("survey_interaction")]
+    public class SurveyInteraction
+    {
+        [Column("user_id")]
+        public Guid UserId { get; set; } = Guid.NewGuid();
+
+        [Column("survey_id")]
+        public int SurveyId { get; set; }
+
+
+        [ForeignKey(nameof(UserId))]
+        public virtual User? User { get; set; }
+
+        [ForeignKey(nameof(SurveyId))]
+        public virtual Survey? Survey { get; set; }
+    }
+}
+  
+=== F:\University\MySurveyApp\src\MySurveyApp.SqlService\Models\SurveyOption.cs ===  
+﻿using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema;
+
+namespace MySurveyApp.SqlService.Models
+{
+    [Table("survey_option")]
+    public class SurveyOption
+    {
+        [Key]
+        [DatabaseGenerated(DatabaseGeneratedOption.Identity)]
+        [Column("option_id ")]
+        public int OptionId { get; set; }
+
+        [Required]
+        [Column("survey_id")]
+        public int SurveyId { get; set; }
+
+        [Required]
+        [MaxLength(255)]
+        [Column("option_text ")]
+        public string OptionText { get; set; } = string.Empty;
+
+        [Required]
+        [Column("order_index ")]
+        public int OrderIndex { get; set; }
+
+        [ForeignKey(nameof(SurveyId))]
+        public virtual Survey? Survey { get; set; }
+    }
+}
+  
+=== F:\University\MySurveyApp\src\MySurveyApp.SqlService\Models\SurveyTopic.cs ===  
+﻿using Microsoft.EntityFrameworkCore;
+using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema;
+
+namespace MySurveyApp.SqlService.Models
+{
+
+    [Table("survey_topic")]
+    [Index(nameof(TopicName), IsUnique = true)]
+    public class SurveyTopic
+    {
+        [Key]
+        [DatabaseGenerated(DatabaseGeneratedOption.Identity)]
+        [Column("topic_id")]
+        public int TopicId { get; set; }
+
+        [Required]
+        [MaxLength(100)]
+        [Column("topic_name")]
+        public string TopicName { get; set; } = string.Empty;
+
+        [Column("domain_id")]
+        public int DomainId { get; set; }
+
+
+        [ForeignKey(nameof(DomainId))]
+        public virtual SurveyDomain? SurveyDomain { get; set; }
+    }
+}
+  
+=== F:\University\MySurveyApp\src\MySurveyApp.SqlService\Models\User.cs ===  
+﻿using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema;
+using MySurveyApp.Shared.Enums;
+
+namespace MySurveyApp.SqlService.Models
+{
+    [Table("users")]
+    public class User
+    {
+        [Key]
+        [Column("user_id")]
+        public Guid UserId { get; set; } = Guid.NewGuid();
+
+        [Required]
+        [Column("user_type")]
+        public UserType UserType { get; set; }  = UserType.Anonymous;
+
+        [MaxLength(100)]
+        [Column("nickname")]
+        public string? Nickname { get; set; }
+
+        [MaxLength(255)]
+        [Column("password_hash")]
+        public string? PasswordHash { get; set; }
+
+        [MaxLength(10)]
+        [Column("gender")]
+        public GenderType? Gender { get; set; }
+
+        [Column("birth_year")]
+        public int? BirthYear { get; set; }
+
+        [Column("occupation_id")]
+        public int? OccupationId { get; set; }
+
+        [Column("region_id")]
+        public int? RegionId { get; set; }
+
+        [Column("hobby_id")]
+        public int? HobbyId { get; set; }
+
+        [Column("answers_count")]
+        public int AnswersCount { get; set; } = 0;
+
+        [Column("available_question_tokens")]
+        public int AvailableQuestionTokens { get; set; } = 0;
+
+
+
+        [ForeignKey(nameof(OccupationId))]
+        public virtual Occupation? Occupation { get; set; }
+
+        [ForeignKey(nameof(HobbyId))]
+        public virtual Hobby? Hobby { get; set; }
+
+        [ForeignKey(nameof(RegionId))]
+        public virtual Region? Region { get; set; }
+
+    }
+}

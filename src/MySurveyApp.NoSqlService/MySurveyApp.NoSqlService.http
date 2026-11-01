@@ -1,0 +1,6 @@
+@MySurveyApp.NoSqlService_HostAddress = http://localhost:5047
+
+GET {{MySurveyApp.NoSqlService_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
