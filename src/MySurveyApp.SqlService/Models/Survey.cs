@@ -56,5 +56,6 @@ namespace MySurveyApp.SqlService.Models
         [ForeignKey(nameof(AuthorId))]
         public virtual User? Author { get; set; }
 
+        public virtual ICollection<SurveyOption> SurveyOptions { get; set; } = new List<SurveyOption>();
     }
 }

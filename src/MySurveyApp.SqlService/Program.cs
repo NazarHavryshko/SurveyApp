@@ -43,6 +43,10 @@ record WeatherForecast(DateOnly Date, int TemperatureC, string? Summary)
 
 using Microsoft.EntityFrameworkCore;
 using MySurveyApp.SqlService.Data;
+using MySurveyApp.SqlService.Models;
+using Swashbuckle.AspNetCore.SwaggerGen;
+using Swashbuckle.AspNetCore.SwaggerUI;
+using System.Reflection;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -56,14 +60,41 @@ builder.Services.AddDbContext<SurveyDbContext>(options =>
 // Додаємо підтримку контролерів 
 builder.Services.AddControllers();
 
+// Реєструємо Swagger / OpenAPI
+builder.Services.AddEndpointsApiExplorer();
+builder.Services.AddSwaggerGen();
+
+builder.Services.AddSwaggerGen(options =>
+{
+    var xmlFilename = $"{Assembly.GetExecutingAssembly().GetName().Name}.xml";
+    var xmlPath = Path.Combine(AppContext.BaseDirectory, xmlFilename);
+    if (File.Exists(xmlPath))
+    {
+        options.IncludeXmlComments(xmlPath);
+    }
+});
+
 var app = builder.Build();
 
 using (var scope = app.Services.CreateScope())
 {
     var dbContext = scope.ServiceProvider.GetRequiredService<SurveyDbContext>();
-    // Застосовує всі не застосовані міграції або створює базу, якщо її немає
+
     dbContext.Database.Migrate();
+
+
+    await dbContext.Database.ExecuteSqlRawAsync(Triggers.CreateTriggersSql);
 }
+
+//робимо доступним у Docker
+app.UseSwagger();
+app.UseSwaggerUI(c =>
+{
+    c.SwaggerEndpoint("/swagger/v1/swagger.json", "MySurveyApp SQL API v1");
+    c.RoutePrefix = string.Empty; // Відкриває UI на кореневому шляху "/"
+});
+
+
 
 // Налаштовуємо маршрутизацію запитів
 app.UseRouting();

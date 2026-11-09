@@ -17,14 +17,16 @@ namespace MySurveyApp.SqlService.Models
 
         [Required]
         [MaxLength(255)]
-        [Column("option_text ")]
+        [Column("option_text")]
         public string OptionText { get; set; } = string.Empty;
 
         [Required]
-        [Column("order_index ")]
+        [Column("order_index")]
         public int OrderIndex { get; set; }
 
         [ForeignKey(nameof(SurveyId))]
         public virtual Survey? Survey { get; set; }
+
+
     }
 }

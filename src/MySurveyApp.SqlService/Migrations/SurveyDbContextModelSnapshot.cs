@@ -1901,11 +1901,11 @@ namespace MySurveyApp.SqlService.Migrations
                         .IsRequired()
                         .HasMaxLength(255)
                         .HasColumnType("character varying(255)")
-                        .HasColumnName("option_text ");
+                        .HasColumnName("option_text");
 
                     b.Property<int>("OrderIndex")
                         .HasColumnType("integer")
-                        .HasColumnName("order_index ");
+                        .HasColumnName("order_index");
 
                     b.Property<int>("SurveyId")
                         .HasColumnType("integer")
@@ -2381,7 +2381,7 @@ namespace MySurveyApp.SqlService.Migrations
             modelBuilder.Entity("MySurveyApp.SqlService.Models.SurveyOption", b =>
                 {
                     b.HasOne("MySurveyApp.SqlService.Models.Survey", "Survey")
-                        .WithMany()
+                        .WithMany("SurveyOptions")
                         .HasForeignKey("SurveyId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
@@ -2419,6 +2419,11 @@ namespace MySurveyApp.SqlService.Migrations
                     b.Navigation("Occupation");
 
                     b.Navigation("Region");
+                });
+
+            modelBuilder.Entity("MySurveyApp.SqlService.Models.Survey", b =>
+                {
+                    b.Navigation("SurveyOptions");
                 });
 #pragma warning restore 612, 618
         }
