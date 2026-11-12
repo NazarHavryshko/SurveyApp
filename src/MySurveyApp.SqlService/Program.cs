@@ -41,12 +41,15 @@ record WeatherForecast(DateOnly Date, int TemperatureC, string? Summary)
 }
 */
 
+using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.IdentityModel.Tokens;
 using MySurveyApp.SqlService.Data;
 using MySurveyApp.SqlService.Models;
 using Swashbuckle.AspNetCore.SwaggerGen;
 using Swashbuckle.AspNetCore.SwaggerUI;
 using System.Reflection;
+using System.Text;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -74,6 +77,27 @@ builder.Services.AddSwaggerGen(options =>
     }
 });
 
+builder.Services.AddAuthentication(options =>
+{
+    options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
+    options.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
+    options.DefaultForbidScheme = JwtBearerDefaults.AuthenticationScheme;
+})
+.AddJwtBearer(options =>
+{
+    // Замініть цей рядок на ваш секретний ключ (має бути мінімум 32 символи)
+    var secretKey = "YOUR_SUPER_SECRET_KEY_FOR_JWT_SURVEY_APP_2026!";
+
+    options.TokenValidationParameters = new TokenValidationParameters
+    {
+        ValidateIssuer = false, // Для спрощення розробки вимикаємо
+        ValidateAudience = false, // Для спрощення розробки вимикаємо
+        ValidateLifetime = true, // Перевіряти час життя токена (Expires)
+        ValidateIssuerSigningKey = true,
+        IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(secretKey))
+    };
+});
+
 var app = builder.Build();
 
 using (var scope = app.Services.CreateScope())
@@ -98,6 +122,10 @@ app.UseSwaggerUI(c =>
 
 // Налаштовуємо маршрутизацію запитів
 app.UseRouting();
+
+app.UseAuthentication(); 
+app.UseAuthorization();
+
 app.MapControllers();
 
 app.Run();

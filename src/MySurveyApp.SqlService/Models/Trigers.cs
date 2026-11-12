@@ -9,7 +9,7 @@
             CREATE OR REPLACE FUNCTION check_and_deduct_survey_token()
             RETURNS TRIGGER AS $$
             DECLARE
-                v_user_type INT;
+                v_user_type VARCHAR(50);
                 v_tokens INT;
             BEGIN
                 SELECT user_type, available_question_tokens 
@@ -17,7 +17,7 @@
                 FROM users 
                 WHERE user_id = NEW.author_id;
 
-                IF v_user_type = 1 THEN
+                IF v_user_type = 'Registered' THEN
                     IF v_tokens <= 0 THEN
                         RAISE EXCEPTION 'Недостатньо токенів для створення опитування.' USING ERRCODE = 'P0001';
                     END IF;

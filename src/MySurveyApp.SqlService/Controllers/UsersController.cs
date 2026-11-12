@@ -1,9 +1,11 @@
 ﻿using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.IdentityModel.Tokens;
 using MySurveyApp.Shared.Enums;
 using MySurveyApp.SqlService.Data;
 using MySurveyApp.SqlService.DTOs;
 using MySurveyApp.SqlService.Models;
+using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
@@ -128,16 +130,16 @@ public class UsersController : ControllerBase
         return await GetById(user.UserId);
     }
 
-    /// <summary>
-    /// Вхід для вже зареєстрованого користувача за нікнеймом і паролем
-    /// </summary>
     [HttpPost("login")]
-    [ProducesResponseType(typeof(UserProfileResponseDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
-    public async Task<ActionResult<UserProfileResponseDto>> Login([FromBody] LoginRequestDto dto)
+    public async Task<IActionResult> Login([FromBody] LoginRequestDto dto)
     {
         var user = await _context.Users
             .AsNoTracking()
+            .Include(u => u.Region)
+            .Include(u => u.Occupation)
+            .Include(u => u.Hobby)
             .FirstOrDefaultAsync(u => u.Nickname != null && u.Nickname.ToLower() == dto.Nickname.Trim().ToLower());
 
         if (user == null || user.PasswordHash == null || !VerifyPassword(dto.Password, user.PasswordHash))
@@ -145,15 +147,63 @@ public class UsersController : ControllerBase
             return Unauthorized(new { message = "Невірний нікнейм або пароль." });
         }
 
-        return await GetById(user.UserId);
+        // 1. Секретний ключ (має збігатися з ключем у Program.cs)
+        var secretKey = "YOUR_SUPER_SECRET_KEY_FOR_JWT_SURVEY_APP_2026!";
+        var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(secretKey));
+        var credentials = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
+
+        // 2. Створення Claims (ідентифікатор та роль користувача)
+        var claims = new[]
+        {
+        new Claim(ClaimTypes.NameIdentifier, user.UserId.ToString()),
+        new Claim(ClaimTypes.Name, user.Nickname ?? string.Empty),
+        new Claim(ClaimTypes.Role, user.UserType.ToString())
+    };
+
+        // 3. Генерація токена
+        var tokenDescriptor = new SecurityTokenDescriptor
+        {
+            Subject = new ClaimsIdentity(claims),
+            Expires = DateTime.UtcNow.AddDays(7),
+            SigningCredentials = credentials
+        };
+
+        var tokenHandler = new JwtSecurityTokenHandler();
+        var securityToken = tokenHandler.CreateToken(tokenDescriptor);
+        string realJwtToken = tokenHandler.WriteToken(securityToken);
+
+        // 4. Формування відповіді профілю
+        var userProfile = new UserProfileResponseDto(
+            user.UserId,
+            user.UserType,
+            user.Nickname,
+            user.Gender,
+            user.BirthYear,
+            user.RegionId,
+            user.Region?.RegionName,
+            user.OccupationId,
+            user.Occupation?.OccupationName,
+            user.HobbyId,
+            user.Hobby?.HobbyName,
+            user.AnswersCount,
+            user.AvailableQuestionTokens
+        );
+
+        // 5. Повертаємо справжній токен замість рядка-заглушки
+        return Ok(new
+        {
+            message = "Успішний вхід",
+            token = realJwtToken,
+            user = userProfile
+        });
     }
 
     /// <summary>
     /// Отримати повний профіль користувача за його UserId
     /// </summary>
     /// <remarks>
-    /// Доступно власнику анонімного профілю (через заголовок X-Device-Key), 
-    /// зареєстрованому власнику (через JWT), або Admin/Moderator.
+    /// Доступно зареєстрованому власнику / Admin / Moderator (через JWT),
+    /// а якщо токен відсутній — власнику анонімного профілю (через X-Device-Key).
     /// </remarks>
     [HttpGet("{userId:guid}")]
     [ProducesResponseType(typeof(UserProfileResponseDto), StatusCodes.Status200OK)]
@@ -162,48 +212,38 @@ public class UsersController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<UserProfileResponseDto>> GetById(Guid userId)
     {
-        // 1. Перевірка для АНОНІМНИХ користувачів
-        // Шукаємо заголовок X-Device-Key, який передає клієнт
-        var deviceKeyHeader = Request.Headers["X-Device-Key"].FirstOrDefault();
-        bool isAnonymousOwner = false;
-
-        if (!string.IsNullOrWhiteSpace(deviceKeyHeader))
-        {
-            // Якщо хеш переданого ключа збігається з userId, це власник пристрою
-            Guid expectedUserId = GenerateGuidFromDeviceKey(deviceKeyHeader);
-            if (expectedUserId == userId)
-            {
-                isAnonymousOwner = true;
-            }
-        }
-
-        // 2. Перевірка для ЗАРЕЄСТРОВАНИХ користувачів (JWT токен)
-        var currentUserIdClaim = User.FindFirstValue(ClaimTypes.NameIdentifier)
-                              ?? User.FindFirstValue("sub");
+        var currentUserIdClaim = User.FindFirstValue(ClaimTypes.NameIdentifier) ?? User.FindFirstValue("sub");
         var currentUserRole = User.FindFirstValue(ClaimTypes.Role);
+        var deviceKeyHeader = Request.Headers["X-Device-Key"].FirstOrDefault();
 
-        bool isRegisteredOwner = false;
-        if (Guid.TryParse(currentUserIdClaim, out Guid authenticatedUserId))
+        // СПОЧАТКУ ПЕРЕВІРЯЄМО JWT ТОКЕН (якщо користувач автентифікований)
+        if (!string.IsNullOrEmpty(currentUserIdClaim) && Guid.TryParse(currentUserIdClaim, out Guid authUserId))
         {
-            if (authenticatedUserId == userId) isRegisteredOwner = true;
-        }
+            bool isAdminOrModerator = currentUserRole == "Admin" || currentUserRole == "Moderator";
 
-        bool isAdminOrModerator = currentUserRole == "Admin" || currentUserRole == "Moderator";
-
-        // 3. ФІНАЛЬНЕ РІШЕННЯ ПРО ДОСТУП
-        if (!isAnonymousOwner && !isRegisteredOwner && !isAdminOrModerator)
-        {
-            // Якщо не передали ні токена, ні DeviceKey
-            if (string.IsNullOrEmpty(currentUserIdClaim) && string.IsNullOrEmpty(deviceKeyHeader))
+            // Доступ дозволено, якщо це власник профілю або адміністратор/модератор
+            if (!isAdminOrModerator && authUserId != userId)
             {
-                return Unauthorized(new { message = "Необхідно виконати автентифікацію (JWT або передати X-Device-Key)." });
+                return StatusCode(StatusCodes.Status403Forbidden, new { message = "Доступ до чужого профілю заборонено." });
             }
+        }
+        // ЯКЩО ТОКЕН НЕ НАДАНО — ПЕРЕВІРЯЄМО X-Device-Key (анонімний власник)
+        else if (!string.IsNullOrWhiteSpace(deviceKeyHeader))
+        {
+            Guid expectedUserId = GenerateGuidFromDeviceKey(deviceKeyHeader);
 
-            // Якщо передали, але вони не збігаються з чужим userId
-            return Forbid();
+            if (expectedUserId != userId)
+            {
+                return StatusCode(StatusCodes.Status403Forbidden, new { message = "Доступ до чужого профілю заборонено." });
+            }
+        }
+        // ЯКЩО НЕ НАДАНО АНІ ТОКЕНА, АНІ X-Device-Key
+        else
+        {
+            return StatusCode(StatusCodes.Status401Unauthorized, new { message = "Необхідно надати JWT токен або заголовок X-Device-Key." });
         }
 
-        // 4. Отримання даних з БД (якщо перевірку пройдено)
+        // Отримання даних з бази, якщо перевірку пройдено
         var user = await _context.Users
             .AsNoTracking()
             .Include(u => u.Region)

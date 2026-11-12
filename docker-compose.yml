@@ -14,6 +14,8 @@ services:
       - "5433:5432"
     volumes:
       - postgres_data:/var/lib/postgresql
+    networks:
+      - survey-network
 
   # Документоорієнтована база даних MongoDB 8.0
   mongodb:
@@ -27,6 +29,8 @@ services:
       - "27017:27017"
     volumes:
       - mongo_data:/data/db
+    networks:
+      - survey-network
 
   # Мікросервіс SqlService
   sql_service:
@@ -40,8 +44,38 @@ services:
     environment:
       - ASPNETCORE_ENVIRONMENT=Development
       - ConnectionStrings__Postgres=Host=postgres_db;Port=5432;Database=surveydb;Username=postgres;Password=mysecretpassword
+      - InternalApiKey=YOUR_SUPER_SECRET_MICROSERVICE_KEY_12345
     depends_on:
       - postgres_db
+    networks:
+      - survey-network
+
+  # 4. Мікросервіс NoSqlService
+  nosql-service:
+    container_name: mysurveyapp-nosql-service
+    build:
+      context: ./src
+      dockerfile: MySurveyApp.NoSqlService/Dockerfile
+    restart: always
+    ports:
+      - "5002:5002"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ASPNETCORE_HTTP_PORTS=5002
+      - MongoDbSettings__ConnectionString=mongodb://mongoadmin:mongosecretpassword@mongodb:27017/?authSource=admin
+      - MongoDbSettings__DatabaseName=MySurveyAppAnalyticsDb
+      - MongoDbSettings__ResponsesCollectionName=survey_responses
+      - SqlServiceSettings__BaseUrl=http://sql_service:8080          
+      - InternalApiKey=YOUR_SUPER_SECRET_MICROSERVICE_KEY_12345
+    depends_on:
+      - mongodb
+      - sql_service
+    networks:
+      - survey-network
+
+networks:
+  survey-network:
+    driver: bridge
 
 volumes:
   postgres_data:

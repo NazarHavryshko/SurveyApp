@@ -1,11 +1,12 @@
-﻿using Microsoft.AspNetCore.Mvc;
+﻿using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using MySurveyApp.Shared.Enums;
+using MySurveyApp.SqlService.Data;      // Замініть на свій неймспейс контексту
+using MySurveyApp.SqlService.DTO;
+using MySurveyApp.SqlService.Models;    // Замініть на свій неймспейс моделей
 using Npgsql;
 using System.Security.Claims;
-using MySurveyApp.SqlService.Data;      // Замініть на свій неймспейс контексту
-using MySurveyApp.SqlService.Models;    // Замініть на свій неймспейс моделей
-using MySurveyApp.SqlService.DTO;
-using MySurveyApp.Shared.Enums;
 
 
 namespace MySurveyApp.SqlService.Controllers
@@ -21,31 +22,27 @@ namespace MySurveyApp.SqlService.Controllers
             _context = context;
         }
 
+        /// <summary>
+        /// Створити нове опитування (Тільки для авторизованих користувачів з JWT).
+        /// </summary>
         [HttpPost]
+        [Authorize] // Захист ендпоінта на рівні JWT-схеми
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+        [ProducesResponseType(StatusCodes.Status403Forbidden)]
+        [ProducesResponseType(StatusCodes.Status500InternalServerError)]
         public async Task<IActionResult> CreateSurvey([FromBody] CreateSurveyDto dto)
         {
-            // 1. Отримання ID автора (Авторизація)
-            var deviceKeyHeader = Request.Headers["X-Device-Key"].FirstOrDefault();
-            var currentUserIdClaim = User.FindFirstValue(ClaimTypes.NameIdentifier) ?? User.FindFirstValue("sub");
+            // 1. Отримання ID автора виключно з JWT-токена
+            var currentUserIdClaim = User.FindFirstValue(ClaimTypes.NameIdentifier)
+                                  ?? User.FindFirstValue("sub");
 
-            Guid authorId;
-
-            // Перевіряємо, чи є JWT токен (зареєстрований користувач/модератор)
-            if (!string.IsNullOrEmpty(currentUserIdClaim) && Guid.TryParse(currentUserIdClaim, out Guid authId))
+            if (string.IsNullOrEmpty(currentUserIdClaim) || !Guid.TryParse(currentUserIdClaim, out Guid authorId))
             {
-                authorId = authId;
-            }
-            // Або перевіряємо ключ пристрою (анонімний користувач)
-            else if (!string.IsNullOrWhiteSpace(deviceKeyHeader))
-            {
-                authorId = GenerateGuidFromDeviceKey(deviceKeyHeader);
-            }
-            else
-            {
-                return Unauthorized(new { message = "Необхідно передати JWT токен або заголовок X-Device-Key." });
+                return Unauthorized(new { message = "Створювати опитування можуть тільки зареєстровані та авторизовані користувачі." });
             }
 
-            // 2. Формування сутності Опитування (Survey)
+            // 2. Формування сутності опитування
             var newSurvey = new Survey
             {
                 AuthorId = authorId,
@@ -56,8 +53,6 @@ namespace MySurveyApp.SqlService.Controllers
                 Status = SurveyStatus.Pending,
                 CreatedAt = DateTime.UtcNow,
                 ExpiresAt = dto.ExpiresAt.ToUniversalTime(),
-
-                // ТЕПЕР ЦЕ ПРАЦЮВАТИМЕ ІДЕАЛЬНО:
                 SurveyOptions = dto.Options.Select(o => new SurveyOption
                 {
                     OptionText = o.OptionText,
@@ -65,12 +60,10 @@ namespace MySurveyApp.SqlService.Controllers
                 }).ToList()
             };
 
-            // 3. Збереження в БД з перехопленням тригера
+            // 3. Збереження в базі даних та перехоплення тригера токенів
             try
             {
                 _context.Surveys.Add(newSurvey);
-
-                // Саме ТУТ спрацює наш тригер у PostgreSQL
                 await _context.SaveChangesAsync();
 
                 return Ok(new
@@ -79,17 +72,19 @@ namespace MySurveyApp.SqlService.Controllers
                     surveyId = newSurvey.SurveyId
                 });
             }
-            catch (DbUpdateException ex)
-                // Якщо токенів недостатньо, тригер кине помилку P0001
-                when (ex.InnerException is PostgresException pgEx && pgEx.SqlState == "P0001")
+            catch (DbUpdateException ex) when (ex.InnerException is PostgresException pgEx && pgEx.SqlState == "P0001")
             {
-                // Повертаємо 403 Forbidden з текстом помилки з тригера
+                // Недостатньо токенів для створення опитування
                 return StatusCode(StatusCodes.Status403Forbidden, new { message = pgEx.MessageText });
             }
             catch (Exception ex)
             {
-                // На випадок інших проблем з базою
-                return StatusCode(StatusCodes.Status500InternalServerError, new { message = "Внутрішня помилка сервера.", details = ex.Message });
+                var innerMessage = ex.InnerException != null ? ex.InnerException.Message : ex.Message;
+                return StatusCode(StatusCodes.Status500InternalServerError, new
+                {
+                    message = "Внутрішня помилка сервера.",
+                    details = innerMessage
+                });
             }
         }
 
@@ -195,60 +190,6 @@ namespace MySurveyApp.SqlService.Controllers
             }
 
             return Ok(new { message = "Не передано жодних нових даних для оновлення." });
-        }
-
-        /// <summary>
-        /// Зафіксувати факт взаємодії (викликається іншим мікросервісом за допомогою API-ключа через Body)
-        /// </summary>
-        [HttpPost("interact")]
-        public async Task<IActionResult> RecordInteraction([FromBody] RecordInteractionDto dto)
-        {
-            // 1. Перевірка системного API-ключа мікросервісу
-            var apiKeyHeader = Request.Headers["X-Api-Key"].FirstOrDefault();
-
-            // Замініть на ваш реальний секретний ключ або конфігурацію
-            string expectedApiKey = "YOUR_SUPER_SECRET_MICROSERVICE_KEY_12345";
-
-            if (string.IsNullOrEmpty(apiKeyHeader) || apiKeyHeader != expectedApiKey)
-            {
-                return StatusCode(StatusCodes.Status401Unauthorized,
-                    new { message = "Недійсний або відсутній системний API-ключ мікросервісу." });
-            }
-
-            // 2. Перевірка, чи існує таке опитування
-            var surveyExists = await _context.Surveys.AnyAsync(s => s.SurveyId == dto.SurveyId);
-            if (!surveyExists)
-            {
-                return NotFound(new { message = $"Опитування з ID {dto.SurveyId} не знайдено." });
-            }
-
-            // 3. Перевірка, чи користувач ВЖЕ взаємодіяв з цим опитуванням
-            var alreadyInteracted = await _context.Set<SurveyInteraction>()
-                .AnyAsync(si => si.SurveyId == dto.SurveyId && si.UserId == dto.UserId);
-
-            if (alreadyInteracted)
-            {
-                return Conflict(new { message = "Користувач вже відповів на це опитування або взаємодіяв з ним." });
-            }
-
-            // 4. Створення запису про взаємодію
-            var interaction = new SurveyInteraction
-            {
-                UserId = dto.UserId,
-                SurveyId = dto.SurveyId
-            };
-
-            _context.Set<SurveyInteraction>().Add(interaction);
-
-            try
-            {
-                await _context.SaveChangesAsync();
-                return Ok(new { message = "Взаємодію успішно зафіксовано." });
-            }
-            catch (Exception)
-            {
-                return StatusCode(StatusCodes.Status500InternalServerError, new { message = "Помилка при збереженні взаємодії." });
-            }
         }
 
         /// <summary>
