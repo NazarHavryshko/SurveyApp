@@ -1,41 +1,35 @@
+using Yarp.ReverseProxy.Transforms;
+
 var builder = WebApplication.CreateBuilder(args);
 
-// Add services to the container.
-// Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
-builder.Services.AddOpenApi();
+builder.Services.AddReverseProxy()
+    .LoadFromConfig(builder.Configuration.GetSection("ReverseProxy"))
+    .AddDnsDestinationResolver()
+    .AddTransforms(context =>
+    {
+        context.AddResponseTransform(responseContext =>
+        {
+            var upstream = responseContext.ProxyResponse?.RequestMessage?.RequestUri?.Authority;
+            if (!string.IsNullOrEmpty(upstream))
+            {
+                responseContext.HttpContext.Response.Headers["X-Handled-By"] = upstream;
+            }
+            return ValueTask.CompletedTask;
+        });
+    });
 
 var app = builder.Build();
 
-// Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())
 {
-    app.MapOpenApi();
+    app.UseSwaggerUI(options =>
+    {
+        options.SwaggerEndpoint("/swagger/sql/swagger.json", "MySurveyApp — SqlService API");
+        options.SwaggerEndpoint("/swagger/nosql/swagger.json", "MySurveyApp — NoSqlService API");
+        options.RoutePrefix = "swagger";
+    });
 }
 
-app.UseHttpsRedirection();
-
-var summaries = new[]
-{
-    "Freezing", "Bracing", "Chilly", "Cool", "Mild", "Warm", "Balmy", "Hot", "Sweltering", "Scorching"
-};
-
-app.MapGet("/weatherforecast", () =>
-{
-    var forecast =  Enumerable.Range(1, 5).Select(index =>
-        new WeatherForecast
-        (
-            DateOnly.FromDateTime(DateTime.Now.AddDays(index)),
-            Random.Shared.Next(-20, 55),
-            summaries[Random.Shared.Next(summaries.Length)]
-        ))
-        .ToArray();
-    return forecast;
-})
-.WithName("GetWeatherForecast");
+app.MapReverseProxy();
 
 app.Run();
-
-record WeatherForecast(DateOnly Date, int TemperatureC, string? Summary)
-{
-    public int TemperatureF => 32 + (int)(TemperatureC / 0.5556);
-}

@@ -1,5 +1,5 @@
 services:
-  # Реляційна база даних PostgreSQL 18
+  # 1. Реляційна база даних PostgreSQL 18
   postgres_db:
     image: postgres:18
     container_name: mysurvey_postgres
@@ -17,7 +17,7 @@ services:
     networks:
       - survey-network
 
-  # Документоорієнтована база даних MongoDB 8.0
+  # 2. Документоорієнтована база даних MongoDB 8.0
   mongodb:
     image: mongo:8.0
     container_name: mysurvey_mongo
@@ -32,15 +32,14 @@ services:
     networks:
       - survey-network
 
-  # Мікросервіс SqlService
+  # 3. Мікросервіс SqlService (без container_name і ports для підтримки --scale)
   sql_service:
-    container_name: mysurvey_sql_service
     build:
       context: ./src
       dockerfile: MySurveyApp.SqlService/Dockerfile
     restart: always
-    ports:
-      - "5001:8080"
+    expose:
+      - "8080"
     environment:
       - ASPNETCORE_ENVIRONMENT=Development
       - ConnectionStrings__Postgres=Host=postgres_db;Port=5432;Database=surveydb;Username=postgres;Password=mysecretpassword
@@ -50,26 +49,43 @@ services:
     networks:
       - survey-network
 
-  # 4. Мікросервіс NoSqlService
+  # 4. Мікросервіс NoSqlService (без container_name і ports для підтримки --scale)
   nosql-service:
-    container_name: mysurveyapp-nosql-service
     build:
       context: ./src
       dockerfile: MySurveyApp.NoSqlService/Dockerfile
     restart: always
-    ports:
-      - "5002:5002"
+    expose:
+      - "5002"
     environment:
       - ASPNETCORE_ENVIRONMENT=Development
       - ASPNETCORE_HTTP_PORTS=5002
       - MongoDbSettings__ConnectionString=mongodb://mongoadmin:mongosecretpassword@mongodb:27017/?authSource=admin
       - MongoDbSettings__DatabaseName=MySurveyAppAnalyticsDb
       - MongoDbSettings__ResponsesCollectionName=survey_responses
-      - SqlServiceSettings__BaseUrl=http://sql_service:8080          
+      - SqlServiceSettings__BaseUrl=http://sql_service:8080
       - InternalApiKey=YOUR_SUPER_SECRET_MICROSERVICE_KEY_12345
     depends_on:
       - mongodb
       - sql_service
+    networks:
+      - survey-network
+
+  # 5. API Gateway / Load Balancer (єдина зовнішня точка входу на порту 5000)
+  api-gateway:
+    build:
+      context: ./src
+      dockerfile: MySurveyApp.ApiGateway/Dockerfile
+    container_name: mysurveyapp-gateway
+    restart: always
+    ports:
+      - "5000:8080"
+    environment:
+      - ASPNETCORE_URLS=http://+:8080
+      - ASPNETCORE_ENVIRONMENT=Development
+    depends_on:
+      - sql_service
+      - nosql-service
     networks:
       - survey-network
 
