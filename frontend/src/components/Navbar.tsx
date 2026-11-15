@@ -14,6 +14,7 @@ export function Navbar() {
   const isAuthenticated = Boolean(localStorage.getItem('mysurvey_jwt_token'));
 
   const isActive = (path: string) => location.pathname === path;
+  const isMySurveysActive = isActive('/my-surveys') || isActive('/surveys/create');
 
   return (
     <>
@@ -42,8 +43,12 @@ export function Navbar() {
             {isAuthenticated ? (
               <>
                 <Link
-                  to="/profile#my-surveys"
-                  className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-muted hover:text-main hover:bg-app transition"
+                  to="/my-surveys"
+                  className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl font-medium transition ${
+                    isMySurveysActive
+                      ? 'bg-accent text-accent-text'
+                      : 'text-muted hover:text-main hover:bg-app'
+                  }`}
                 >
                   <FolderKanban className="w-4 h-4" />
                   <span>Мої опитування</span>
@@ -105,8 +110,10 @@ export function Navbar() {
         {isAuthenticated ? (
           <>
             <Link
-              to="/profile#my-surveys"
-              className="flex flex-col items-center gap-1 py-1 px-3 rounded-lg text-muted"
+              to="/my-surveys"
+              className={`flex flex-col items-center gap-1 py-1 px-3 rounded-lg ${
+                isMySurveysActive ? 'text-accent font-semibold' : 'text-muted'
+              }`}
             >
               <FolderKanban className="w-5 h-5" />
               <span>Мої</span>

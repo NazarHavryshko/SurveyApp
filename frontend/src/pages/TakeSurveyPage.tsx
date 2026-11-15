@@ -12,61 +12,22 @@ import {
   AlertCircle,
   Info,
 } from 'lucide-react';
-import { apiClient, ensureAnonymousSession } from '../api/apiClient';
+import { apiClient } from '../api/apiClient';
 import { SAVED_FILTERS_KEY } from './SurveysFilterPage';
+import {
+  consumePreloadedSurvey,
+  fetchSingleSurveyQuestion,
+} from '../utils/surveyPreloader';
 import type {
   RandomSurveyDto,
   SavedSurveyFilters,
   SubmitResponseRequest,
 } from '../types/survey';
 
-const SHUFFLE_BAG_KEY = 'mysurvey_shuffle_bag';
-const SHUFFLE_BAG_META_KEY = 'mysurvey_shuffle_bag_meta';
-const TOPIC_EXHAUSTED_PREFIX = 'mysurvey_topic_exhausted_';
-
-function buildShuffleBag(preferredCount: number): number[] {
-  const ones = Math.min(8, Math.max(5, preferredCount));
-  const zeros = 10 - ones;
-  return [...Array(ones).fill(1), ...Array(zeros).fill(0)];
-}
-
-/**
- * Бере одне випадкове значення (1 або 0) зі списку Shuffle Bag.
- * Коли список закінчується — створює його заново відповідно до вибраного відношення.
- */
-function drawNextTopicFlag(filters: SavedSurveyFilters): 0 | 1 {
-  const metaSignature = `${filters.domainId}:${filters.topicId}:${filters.preferredCount}`;
-  const savedMeta = localStorage.getItem(SHUFFLE_BAG_META_KEY);
-  let bag: number[] = [];
-
-  if (savedMeta === metaSignature) {
-    try {
-      const parsed = JSON.parse(localStorage.getItem(SHUFFLE_BAG_KEY) || '[]');
-      if (Array.isArray(parsed)) {
-        bag = parsed.filter((v) => v === 0 || v === 1);
-      }
-    } catch {
-      bag = [];
-    }
-  }
-
-  if (bag.length === 0) {
-    bag = buildShuffleBag(filters.preferredCount);
-  }
-
-  const randomIndex = Math.floor(Math.random() * bag.length);
-  const picked = (bag[randomIndex] === 1 ? 1 : 0) as 0 | 1;
-
-  bag.splice(randomIndex, 1);
-  localStorage.setItem(SHUFFLE_BAG_KEY, JSON.stringify(bag));
-  localStorage.setItem(SHUFFLE_BAG_META_KEY, metaSignature);
-
-  return picked;
-}
-
 export function TakeSurveyPage() {
   const navigate = useNavigate();
   const hasLoadedRef = useRef(false);
+  const questionStartTimeRef = useRef<number | null>(null);
 
   const [filters, setFilters] = useState<SavedSurveyFilters | null>(null);
   const [survey, setSurvey] = useState<RandomSurveyDto | null>(null);
@@ -81,6 +42,14 @@ export function TakeSurveyPage() {
   const [error, setError] = useState<string>('');
   const [emptyPoolMessage, setEmptyPoolMessage] = useState<string>('');
 
+  useEffect(() => {
+    if (survey && !loading) {
+      questionStartTimeRef.current = performance.now();
+    } else {
+      questionStartTimeRef.current = null;
+    }
+  }, [survey?.surveyId, loading]);
+
   const fetchNextQuestion = async (activeFilters: SavedSurveyFilters) => {
     setLoading(true);
     setError('');
@@ -88,70 +57,25 @@ export function TakeSurveyPage() {
     setSurvey(null);
     setSelectedOptionIds([]);
     setOpenAnswer('');
-
-    const exhaustedKey = `${TOPIC_EXHAUSTED_PREFIX}${activeFilters.topicId}`;
-    setTopicExhausted(sessionStorage.getItem(exhaustedKey) === 'true');
+    questionStartTimeRef.current = null;
 
     try {
-      await ensureAnonymousSession();
+      const entry = await fetchSingleSurveyQuestion(activeFilters);
+      setIsPreferredPick(entry.isPreferredPick);
+      setTopicExhausted(entry.topicExhausted);
 
-      const flag = drawNextTopicFlag(activeFilters);
-      const preferred = flag === 1;
-      setIsPreferredPick(preferred);
-
-      const savedRegionId = localStorage.getItem('mysurvey_user_region_id');
-      const regionParam = savedRegionId ? { regionId: Number(savedRegionId) } : {};
-
-      const primaryParams = preferred
-        ? { topicId: activeFilters.topicId, ...regionParam }
-        : { excludeTopicId: activeFilters.topicId, ...regionParam };
-
-      const fallbackParams = preferred
-        ? { excludeTopicId: activeFilters.topicId, ...regionParam }
-        : { topicId: activeFilters.topicId, ...regionParam };
-
-      try {
-        const res = await apiClient.get<RandomSurveyDto>('/Surveys/random', {
-          params: primaryParams,
-        });
-        if (preferred) {
-          sessionStorage.removeItem(exhaustedKey);
-          setTopicExhausted(false);
-        }
-        setSurvey(res.data);
-      } catch (firstErr: any) {
-        if (firstErr.response?.status === 404) {
-          if (preferred) {
-            // Усі питання з вибраної теми закінчилися — вмикаємо банер і переходимо на рандомні теми
-            sessionStorage.setItem(exhaustedKey, 'true');
-            setTopicExhausted(true);
-          }
-
-          setIsPreferredPick(!preferred);
-          const fallbackRes = await apiClient.get<RandomSurveyDto>('/Surveys/random', {
-            params: fallbackParams,
-          });
-
-          if (!preferred) {
-            sessionStorage.removeItem(exhaustedKey);
-            setTopicExhausted(false);
-          }
-          setSurvey(fallbackRes.data);
-        } else {
-          throw firstErr;
-        }
-      }
-    } catch (err: any) {
-      if (err.response?.status === 404) {
+      if (entry.emptyPoolMessage || !entry.survey) {
         setEmptyPoolMessage(
-          err.response?.data?.message ||
+          entry.emptyPoolMessage ||
             'Ви вже відповіли на всі доступні активні опитування для обраних параметрів.'
         );
       } else {
-        const status = err.response?.status;
-        const msg = err.response?.data?.message || err.response?.data?.title || err.message;
-        setError(`Не вдалося завантажити питання (${status || 'мережа'}): ${msg}`);
+        setSurvey(entry.survey);
       }
+    } catch (err: any) {
+      const status = err.response?.status;
+      const msg = err.response?.data?.message || err.response?.data?.title || err.message;
+      setError(`Не вдалося завантажити питання (${status || 'мережа'}): ${msg}`);
     } finally {
       setLoading(false);
     }
@@ -173,7 +97,27 @@ export function TakeSurveyPage() {
         navigate('/surveys', { replace: true });
         return;
       }
+
       setFilters(parsed);
+
+      // Перевіряємо фоновий буфер (1 питання з SurveyAnalysisPage)
+      const buffered = consumePreloadedSurvey(parsed);
+      if (buffered && (buffered.survey || buffered.emptyPoolMessage)) {
+        setIsPreferredPick(buffered.isPreferredPick);
+        setTopicExhausted(buffered.topicExhausted);
+
+        if (buffered.emptyPoolMessage || !buffered.survey) {
+          setEmptyPoolMessage(
+            buffered.emptyPoolMessage ||
+              'Ви вже відповіли на всі доступні активні опитування для обраних параметрів.'
+          );
+        } else {
+          setSurvey(buffered.survey);
+        }
+        setLoading(false);
+        return;
+      }
+
       fetchNextQuestion(parsed);
     } catch {
       navigate('/surveys', { replace: true });
@@ -210,11 +154,17 @@ export function TakeSurveyPage() {
     setSubmitting(true);
     setError('');
 
+    const answeredMs =
+      questionStartTimeRef.current !== null
+        ? Math.max(0, Math.round(performance.now() - questionStartTimeRef.current))
+        : 0;
+
     const payload: SubmitResponseRequest = {
       surveyId: survey.surveyId,
       selectedOptionIds: isOpenOrNumeric ? [] : selectedOptionIds,
       openAnswer: isOpenOrNumeric ? openAnswer.trim() : null,
       isPreferredDomain: isPreferredPick,
+      answeredMs,
     };
 
     try {

@@ -17,6 +17,7 @@ import type {
   SurveyDomain,
   SurveyTopic,
 } from '../types/survey';
+import { clearPreloadedSurvey } from '../utils/surveyPreloader';
 
 export const SAVED_FILTERS_KEY = 'mysurvey_survey_filters';
 
@@ -140,6 +141,7 @@ export function SurveysFilterPage() {
   };
 
   const handleResetFilters = () => {
+    clearPreloadedSurvey();
     localStorage.removeItem(SAVED_FILTERS_KEY);
     setSelectedDomainId('');
     setSelectedTopicId('');
@@ -172,6 +174,7 @@ export function SurveysFilterPage() {
     localStorage.setItem(SAVED_FILTERS_KEY, JSON.stringify(filtersToSave));
 
     await ensureAnonymousSession();
+    clearPreloadedSurvey();
     navigate('/survey/play');
   };
 

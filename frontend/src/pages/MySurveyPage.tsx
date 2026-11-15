@@ -14,6 +14,7 @@ import {
   ChevronDown,
   Layers,
   ListChecks,
+  Download,
 } from 'lucide-react';
 import { apiClient, JWT_TOKEN_KEY } from '../api/apiClient';
 import type { AuthUserResponse } from '../types/auth';
@@ -94,7 +95,7 @@ function formatSurveyType(rawType?: string | number | null): string {
     val === 'scale' ||
     val === 'rating'
   ) {
-    return 'Числова шкала';
+    return 'Числова відповідь';
   }
 
   if (val === '3' || val === 'boolean' || val === 'yesno' || val === 'yes_no') {
@@ -166,7 +167,6 @@ function applyDiagramStats(
     ? formatSurveyType(diagram!.surveyType)
     : survey.surveyType;
 
-  // Для "Кілька варіантів": формуємо статистику безпосередньо по відповідях із графіка (diagram.items)
   if (isMultiple) {
     const sumItemCounts = diagramItems.reduce((sum, d) => sum + Number(d.count ?? 0), 0);
     const totalVotes =
@@ -193,7 +193,6 @@ function applyDiagramStats(
     };
   }
 
-  // Для одиночного вибору ("Один варіант"): зіставляємо варіанти з даними діаграми
   let mergedOptions: SurveyOptionStat[] = survey.options.map((opt) => {
     const normalizedLabel = opt.text.trim().toLowerCase();
     const matched = diagramItems.find(
@@ -301,6 +300,9 @@ export function MySurveysPage() {
 
   const [surveys, setSurveys] = useState<MySurveyItem[]>([]);
   const [expandedIds, setExpandedIds] = useState<Record<string, boolean>>({});
+  const [csvErrorBySurvey, setCsvErrorBySurvey] = useState<Record<string, string>>({});
+  const [downloadingCsvId, setDownloadingCsvId] = useState<string | null>(null);
+
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string>('');
 
@@ -380,6 +382,60 @@ export function MySurveysPage() {
     }));
   };
 
+  const handleDownloadCsv = async (surveyId: string | number) => {
+    const key = String(surveyId);
+    if (downloadingCsvId) return;
+
+    setDownloadingCsvId(key);
+    setCsvErrorBySurvey((prev) => ({ ...prev, [key]: '' }));
+
+    try {
+      const response = await apiClient.get(`/internal/surveys/${surveyId}/responses/csv`, {
+        responseType: 'blob',
+      });
+
+      const contentDisposition = response.headers['content-disposition'] as string | undefined;
+      let fileName = `survey_${surveyId}_responses.csv`;
+
+      if (contentDisposition) {
+        const match = contentDisposition.match(/filename\*?=(?:UTF-8'')?["']?([^;"'\n]+)["']?/i);
+        if (match?.[1]) {
+          fileName = decodeURIComponent(match[1]);
+        }
+      }
+
+      const blob = new Blob([response.data], { type: 'text/csv;charset=utf-8;' });
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', fileName);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (err: any) {
+      let message = err.message;
+      if (err.response?.data instanceof Blob) {
+        try {
+          const text = await err.response.data.text();
+          const parsed = JSON.parse(text);
+          message = parsed.message || text;
+        } catch {
+          // Залишаємо стандартне повідомлення помилки
+        }
+      } else if (err.response?.data?.message) {
+        message = err.response.data.message;
+      }
+
+      setCsvErrorBySurvey((prev) => ({
+        ...prev,
+        [key]: `Не вдалося завантажити CSV-файл: ${message}`,
+      }));
+    } finally {
+      setDownloadingCsvId(null);
+    }
+  };
+
   return (
     <div className="w-full max-w-3xl mx-auto space-y-5">
       {/* Верхня панель: заголовок, баланс токенів та кнопка створення */}
@@ -390,7 +446,8 @@ export function MySurveysPage() {
               Мої опитування
             </h1>
             <p className="text-xs sm:text-sm text-muted">
-              Натисніть на опитування зі списку, щоб переглянути результати відповідей.
+              Натисніть на опитування зі списку, щоб переглянути результати відповідей та вивантажити
+              CSV-звіт.
             </p>
           </div>
 
@@ -480,8 +537,10 @@ export function MySurveysPage() {
         /* Список опитувань (згорнутий за замовчуванням) */
         <div className="space-y-3">
           {surveys.map((survey) => {
+            const key = String(survey.id);
             const badge = getStatusBadge(survey.status);
-            const isExpanded = Boolean(expandedIds[String(survey.id)]);
+            const isExpanded = Boolean(expandedIds[key]);
+            const csvError = csvErrorBySurvey[key];
 
             return (
               <article
@@ -545,16 +604,38 @@ export function MySurveysPage() {
                         <span>Створено: {formatDate(survey.createdAt)}</span>
                       </div>
 
-                      <div className="inline-flex items-center gap-1.5 font-medium">
-                        <Users className="w-3.5 h-3.5" />
-                        <span>Усього відповідей: {survey.totalVotes}</span>
+                      <div className="flex items-center gap-3">
+                        <div className="inline-flex items-center gap-1.5 font-medium">
+                          <Users className="w-3.5 h-3.5" />
+                          <span>Усього відповідей: {survey.totalVotes}</span>
+                        </div>
+
+                        {survey.totalVotes > 0 && (
+                          <button
+                            type="button"
+                            disabled={downloadingCsvId === key}
+                            onClick={() => handleDownloadCsv(survey.id)}
+                            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-accent/10 hover:bg-accent/20 border border-accent/30 text-accent text-xs font-semibold transition cursor-pointer disabled:opacity-50"
+                          >
+                            <Download className="w-3.5 h-3.5" />
+                            <span>
+                              {downloadingCsvId === key
+                                ? 'Формування CSV...'
+                                : 'Завантажити повний CSV'}
+                            </span>
+                          </button>
+                        )}
                       </div>
                     </div>
 
+                    {csvError && (
+                      <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-500 text-xs">
+                        {csvError}
+                      </div>
+                    )}
+
                     {survey.isMultipleChoice ? (
-                      /* ================= КІЛЬКА ВАРІАНТІВ ================= */
                       <>
-                        {/* 1. Спочатку виписуємо варіанти відповідей опитування */}
                         {survey.options.length > 0 && (
                           <div className="space-y-2">
                             <div className="flex items-center gap-1.5 text-xs font-semibold text-muted">
@@ -578,7 +659,6 @@ export function MySurveysPage() {
                           </div>
                         )}
 
-                        {/* 2. Нижче виводимо статистику за відповідями як у графіку */}
                         <div className="space-y-2">
                           <span className="block text-xs font-semibold text-muted">
                             Відповіді користувачів:
@@ -613,10 +693,9 @@ export function MySurveysPage() {
                           )}
                         </div>
                       </>
-                    ) : /* ================= ОДИН ВАРІАНТ (ТА ІНШІ ТИПИ) ================= */
-                    survey.options.length === 0 ? (
+                    ) : survey.options.length === 0 ? (
                       <p className="text-xs sm:text-sm text-muted py-2">
-                        Варіанти відповідей ще відсутні.
+                        Фіксовані варіанти відповідей відсутні (числове або відкрите опитування).
                       </p>
                     ) : (
                       <div className="space-y-2">

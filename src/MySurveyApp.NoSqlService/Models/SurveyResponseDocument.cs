@@ -35,4 +35,7 @@ public class SurveyResponseDocument
 
     [BsonElement("user_snapshot")]
     public UserSnapshot UserSnapshot { get; set; } = new();
+
+    [BsonElement("answered_ms")]
+    public long? AnsweredMs { get; set; }
 }

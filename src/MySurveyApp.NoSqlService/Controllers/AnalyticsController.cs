@@ -1,4 +1,6 @@
 ﻿using System.Globalization;
+using System.Text;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using MongoDB.Bson;
 using MongoDB.Driver;
@@ -127,5 +129,91 @@ public class AnalyticsController : ControllerBase
             SurveyType: surveyType,
             TotalResponses: totalResponses,
             Items: sortedItems));
+    }
+
+    /// <summary>
+    /// Повний експорт знеособлених відповідей опитування у форматі CSV
+    /// </summary>
+    [Authorize]
+    [HttpGet("{surveyId:int}/responses/csv")]
+    [Produces("text/csv")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    public async Task<IActionResult> ExportSurveyResponsesCsv(
+    int surveyId,
+    CancellationToken cancellationToken)
+    {
+        var filter = Builders<SurveyResponseDocument>.Filter.Eq(d => d.SurveyId, surveyId);
+        var sort = Builders<SurveyResponseDocument>.Sort.Ascending(d => d.AnsweredAt);
+
+        var documents = await _responsesCollection
+            .Find(filter)
+            .Sort(sort)
+            .ToListAsync(cancellationToken);
+
+        var sb = new StringBuilder();
+
+        // Заголовки стовпців без дати/часу та часу реакції
+        sb.AppendLine(string.Join(";", new[]
+        {
+        "№",
+        "Рік народження",
+        "Стать",
+        "Регіон респондента",
+        "Галузь діяльності",
+        "Професія",
+        "Хобі",
+        "Питання з обраної теми",
+        "Відповідь"
+    }.Select(EscapeCsv)));
+
+        for (int i = 0; i < documents.Count; i++)
+        {
+            var doc = documents[i];
+            var snap = doc.UserSnapshot;
+
+            string birthYearStr = snap?.BirthYear is > 1900
+                ? snap.BirthYear.Value.ToString(CultureInfo.InvariantCulture)
+                : "Не вказано";
+
+            string answersStr = doc.Answers != null && doc.Answers.Count > 0
+                ? string.Join(" | ", doc.Answers)
+                : "";
+
+            var row = new[]
+            {
+            (i + 1).ToString(CultureInfo.InvariantCulture),
+            birthYearStr,
+            string.IsNullOrWhiteSpace(snap?.Gender) ? "Не вказано" : snap.Gender,
+            string.IsNullOrWhiteSpace(snap?.RegionName) ? "Не вказано" : snap.RegionName,
+            string.IsNullOrWhiteSpace(snap?.OccDomainName) ? "Не вказано" : snap.OccDomainName,
+            string.IsNullOrWhiteSpace(snap?.OccupationName) ? "Не вказано" : snap.OccupationName,
+            string.IsNullOrWhiteSpace(snap?.HobbyName) ? "Не вказано" : snap.HobbyName,
+            doc.IsPreferredDomain ? "Так" : "Ні",
+            answersStr
+        };
+
+            sb.AppendLine(string.Join(";", row.Select(EscapeCsv)));
+        }
+
+        var bom = Encoding.UTF8.GetPreamble();
+        var csvBytes = Encoding.UTF8.GetBytes(sb.ToString());
+        var resultBytes = new byte[bom.Length + csvBytes.Length];
+        Buffer.BlockCopy(bom, 0, resultBytes, 0, bom.Length);
+        Buffer.BlockCopy(csvBytes, 0, resultBytes, bom.Length, csvBytes.Length);
+
+        var timestamp = DateTime.UtcNow.ToString("yyyy-MM-dd_HH-mm", CultureInfo.InvariantCulture);
+        var fileName = $"survey_responses_{timestamp}.csv";
+
+        return File(resultBytes, "text/csv; charset=utf-8", fileName);
+    }
+
+    private static string EscapeCsv(string? value)
+    {
+        if (string.IsNullOrEmpty(value))
+            return "\"\"";
+
+        var normalized = value.Replace("\r\n", " ").Replace("\n", " ").Replace("\r", " ");
+        return $"\"{normalized.Replace("\"", "\"\"")}\"";
     }
 }

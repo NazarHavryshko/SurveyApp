@@ -6,7 +6,7 @@ builder.Services.AddCors(options =>
 {
     options.AddPolicy("FrontendPolicy", policy =>
     {
-        policy.WithOrigins("http://localhost:5173")
+        policy.WithOrigins("http://localhost:5173", "http://localhost:4173")
               .AllowAnyHeader()
               .AllowAnyMethod()
               .WithExposedHeaders("X-Handled-By");
@@ -40,6 +40,9 @@ if (app.Environment.IsDevelopment())
         options.RoutePrefix = "swagger";
     });
 }
+
+// Підключаємо політику CORS обов'язково ДО MapReverseProxy()
+app.UseCors("FrontendPolicy");
 
 app.MapReverseProxy();
 

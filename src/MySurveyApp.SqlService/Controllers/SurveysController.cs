@@ -59,7 +59,7 @@ namespace MySurveyApp.SqlService.Controllers
             // 4. Підготовка варіантів відповідей залежно від типу опитування
             var surveyOptions = new List<SurveyOption>();
 
-            if (parsedSurveyType != SurveyType.RatingScale)
+            if (parsedSurveyType != SurveyType.Numeric)
             {
                 var validOptions = (dto.Options ?? new List<CreateSurveyOptionDto>())
                     .Where(o => !string.IsNullOrWhiteSpace(o.OptionText))
@@ -196,12 +196,18 @@ namespace MySurveyApp.SqlService.Controllers
             }
 
             // 4. Оновлення варіантів відповідей (якщо вони передані)
-            if (dto.Options != null && dto.Options.Any())
+            if (survey.SurveyType == SurveyType.Numeric)
             {
-                // Видаляємо старі варіанти з бази даних
+                if (survey.SurveyOptions.Any())
+                {
+                    _context.Set<SurveyOption>().RemoveRange(survey.SurveyOptions);
+                    isUpdated = true;
+                }
+            }
+            else if (dto.Options != null && dto.Options.Any())
+            {
                 _context.Set<SurveyOption>().RemoveRange(survey.SurveyOptions);
 
-                // Додаємо нові варіанти
                 survey.SurveyOptions = dto.Options.Select(o => new SurveyOption
                 {
                     OptionText = o.OptionText,

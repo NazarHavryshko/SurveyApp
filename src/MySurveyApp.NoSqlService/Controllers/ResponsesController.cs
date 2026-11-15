@@ -29,8 +29,8 @@ public class ResponsesController : ControllerBase
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(StatusCodes.Status502BadGateway)]
     public async Task<IActionResult> SubmitResponse(
-        [FromBody] SubmitSurveyResponseDto dto,
-        CancellationToken cancellationToken)
+    [FromBody] SubmitSurveyResponseDto dto,
+    CancellationToken cancellationToken)
     {
         // 1. Витягуємо UserId з JWT-токена (якщо передано Authorization: Bearer ...)
         var userIdClaim = User.FindFirstValue(ClaimTypes.NameIdentifier);
@@ -91,11 +91,12 @@ public class ResponsesController : ControllerBase
             SurveyDomain = context.SurveyDomain,
             SurveyTopic = context.SurveyTopic,
             AnsweredAt = DateTime.UtcNow,
+            AnsweredMs = dto.AnsweredMs,
             IsPreferredDomain = dto.IsPreferredDomain,
             UserSnapshot = new UserSnapshot
             {
                 Gender = context.UserSnapshot.Gender,
-                BirthYear = context.UserSnapshot.BirthYear.HasValue ? new DateTime(context.UserSnapshot.BirthYear.Value, 1, 1, 0, 0, 0, DateTimeKind.Utc) : null,
+                BirthYear = context.UserSnapshot.BirthYear,
                 RegionName = context.UserSnapshot.RegionName,
                 OccDomainName = context.UserSnapshot.OccDomainName,
                 OccupationName = context.UserSnapshot.OccupationName,

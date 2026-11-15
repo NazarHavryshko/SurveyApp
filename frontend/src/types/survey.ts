@@ -89,3 +89,11 @@ export interface SubmitResponseRequest {
   openAnswer: string | null;
   isPreferredDomain: boolean;
 }
+
+export interface SubmitResponseRequest {
+  surveyId: number;
+  selectedOptionIds: number[];
+  openAnswer: string | null;
+  isPreferredDomain: boolean;
+  answeredMs: number;
+}

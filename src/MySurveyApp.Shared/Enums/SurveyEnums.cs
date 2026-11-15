@@ -18,5 +18,5 @@ public enum SurveyType
 {
     SingleChoice,
     MultipleChoice,
-    RatingScale
+    Numeric
 }

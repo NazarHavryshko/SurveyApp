@@ -10,9 +10,17 @@ import {
 } from 'lucide-react';
 import { apiClient } from '../api/apiClient';
 import { SurveyChart } from '../components/SurveyChart';
-import type { OptionStat, SurveyDiagramData } from '../types/survey';
-
-const SHUFFLE_BAG_KEY = 'mysurvey_shuffle_bag';
+import { SAVED_FILTERS_KEY } from './SurveysFilterPage';
+import {
+  PRELOADED_SURVEY_KEY,
+  SHUFFLE_BAG_KEY,
+  preloadNextSurveyToBuffer,
+} from '../utils/surveyPreloader';
+import type {
+  OptionStat,
+  SavedSurveyFilters,
+  SurveyDiagramData,
+} from '../types/survey';
 
 function getRemainingBagCount(): number {
   try {
@@ -45,7 +53,10 @@ export function SurveyAnalysisPage() {
   const [data, setData] = useState<SurveyDiagramData | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string>('');
-  const [remainingInCycle] = useState<number>(() => getRemainingBagCount());
+  const [remainingInCycle, setRemainingInCycle] = useState<number>(() => getRemainingBagCount());
+  const [isNextReady, setIsNextReady] = useState<boolean>(() =>
+    Boolean(sessionStorage.getItem(PRELOADED_SURVEY_KEY))
+  );
 
   useEffect(() => {
     if (!id) {
@@ -53,12 +64,15 @@ export function SurveyAnalysisPage() {
       return;
     }
 
+    let isMounted = true;
     setLoading(true);
     setError('');
 
+    // 1. Запит №1: отримання даних кругової діаграми
     apiClient
       .get<DiagramApiResponse>(`/internal/surveys/${id}/diagram`)
       .then((res) => {
+        if (!isMounted) return;
         const raw = res.data;
         const items = Array.isArray(raw?.items) ? raw.items : [];
         const total =
@@ -85,16 +99,38 @@ export function SurveyAnalysisPage() {
         });
       })
       .catch((err) => {
+        if (!isMounted) return;
         const status = err.response?.status;
         const msg = err.response?.data?.message || err.response?.data?.title || err.message;
         setError(`Не вдалося завантажити діаграму (${status || 'мережа'}): ${msg}`);
       })
-      .finally(() => setLoading(false));
+      .finally(() => {
+        if (isMounted) setLoading(false);
+      });
+
+    // 2. Запит №2 (паралельний у фоні): підвантаження 1 наступного питання в sessionStorage
+    const rawFilters = localStorage.getItem(SAVED_FILTERS_KEY);
+    if (rawFilters) {
+      try {
+        const parsedFilters = JSON.parse(rawFilters) as SavedSurveyFilters;
+        if (parsedFilters.topicId) {
+          preloadNextSurveyToBuffer(parsedFilters, [Number(id)]).then(() => {
+            if (!isMounted) return;
+            setRemainingInCycle(getRemainingBagCount());
+            setIsNextReady(Boolean(sessionStorage.getItem(PRELOADED_SURVEY_KEY)));
+          });
+        }
+      } catch {
+        // Ігноруємо пошкоджені фільтри
+      }
+    }
+
+    return () => {
+      isMounted = false;
+    };
   }, [id, navigate, passedQuestionText]);
 
   const handleNextQuestion = () => {
-    // Повертаємось на сторінку проходження; поточний масив mysurvey_shuffle_bag
-    // не перестворюється, а забирає наступний елемент (наприклад, 9 з 10 -> 8 з 10)
     navigate('/survey/play');
   };
 
@@ -152,7 +188,7 @@ export function SurveyAnalysisPage() {
             onClick={handleNextQuestion}
             className="flex-1 py-3.5 px-6 rounded-xl bg-accent hover:bg-accent-hover text-accent-text font-semibold text-base inline-flex items-center justify-center gap-2.5 transition shadow-sm cursor-pointer"
           >
-            <span>Наступне питання</span>
+            <span>{isNextReady ? 'Наступне питання' : 'Наступне питання'}</span>
             <ArrowRight className="w-5 h-5" />
           </button>
 

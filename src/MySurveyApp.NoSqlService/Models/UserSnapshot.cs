@@ -8,7 +8,7 @@ public class UserSnapshot
     public string Gender { get; set; } = string.Empty;
 
     [BsonElement("birth_year")]
-    public DateTime? BirthYear { get; set; }
+    public int? BirthYear { get; set; }
 
     [BsonElement("region_name")]
     public string RegionName { get; set; } = string.Empty;
