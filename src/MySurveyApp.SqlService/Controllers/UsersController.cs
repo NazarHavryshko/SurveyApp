@@ -1,4 +1,5 @@
-﻿using Microsoft.AspNetCore.Mvc;
+﻿using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using MySurveyApp.Shared.Enums;
@@ -127,7 +128,7 @@ public class UsersController : ControllerBase
         await _context.SaveChangesAsync();
 
         // 5. Повертаємо повний профіль із підтягнутими назвами довідників
-        return await GetById(user.UserId);
+        return Ok(new { message = "Реєстрація успішна.", userId = user.UserId });
     }
 
     [HttpPost("login")]
@@ -199,51 +200,21 @@ public class UsersController : ControllerBase
     }
 
     /// <summary>
-    /// Отримати повний профіль користувача за його UserId
+    /// Отримати повний профіль поточного авторизованого користувача за його JWT токеном.
     /// </summary>
-    /// <remarks>
-    /// Доступно зареєстрованому власнику / Admin / Moderator (через JWT),
-    /// а якщо токен відсутній — власнику анонімного профілю (через X-Device-Key).
-    /// </remarks>
-    [HttpGet("{userId:guid}")]
+    [Authorize]
+    [HttpGet("profile")]
     [ProducesResponseType(typeof(UserProfileResponseDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
-    [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<ActionResult<UserProfileResponseDto>> GetById(Guid userId)
+    public async Task<ActionResult<UserProfileResponseDto>> GetCurrentProfile()
     {
         var currentUserIdClaim = User.FindFirstValue(ClaimTypes.NameIdentifier) ?? User.FindFirstValue("sub");
-        var currentUserRole = User.FindFirstValue(ClaimTypes.Role);
-        var deviceKeyHeader = Request.Headers["X-Device-Key"].FirstOrDefault();
-
-        // СПОЧАТКУ ПЕРЕВІРЯЄМО JWT ТОКЕН (якщо користувач автентифікований)
-        if (!string.IsNullOrEmpty(currentUserIdClaim) && Guid.TryParse(currentUserIdClaim, out Guid authUserId))
+        if (string.IsNullOrEmpty(currentUserIdClaim) || !Guid.TryParse(currentUserIdClaim, out Guid userId))
         {
-            bool isAdminOrModerator = currentUserRole == "Admin" || currentUserRole == "Moderator";
-
-            // Доступ дозволено, якщо це власник профілю або адміністратор/модератор
-            if (!isAdminOrModerator && authUserId != userId)
-            {
-                return StatusCode(StatusCodes.Status403Forbidden, new { message = "Доступ до чужого профілю заборонено." });
-            }
-        }
-        // ЯКЩО ТОКЕН НЕ НАДАНО — ПЕРЕВІРЯЄМО X-Device-Key (анонімний власник)
-        else if (!string.IsNullOrWhiteSpace(deviceKeyHeader))
-        {
-            Guid expectedUserId = GenerateGuidFromDeviceKey(deviceKeyHeader);
-
-            if (expectedUserId != userId)
-            {
-                return StatusCode(StatusCodes.Status403Forbidden, new { message = "Доступ до чужого профілю заборонено." });
-            }
-        }
-        // ЯКЩО НЕ НАДАНО АНІ ТОКЕНА, АНІ X-Device-Key
-        else
-        {
-            return StatusCode(StatusCodes.Status401Unauthorized, new { message = "Необхідно надати JWT токен або заголовок X-Device-Key." });
+            return Unauthorized(new { message = "Невалідний або відсутній JWT токен." });
         }
 
-        // Отримання даних з бази, якщо перевірку пройдено
         var user = await _context.Users
             .AsNoTracking()
             .Include(u => u.Region)
@@ -253,7 +224,7 @@ public class UsersController : ControllerBase
 
         if (user == null)
         {
-            return NotFound(new { message = $"Користувача з ID {userId} не знайдено." });
+            return NotFound(new { message = "Користувача не знайдено." });
         }
 
         return Ok(new UserProfileResponseDto(
@@ -271,6 +242,129 @@ public class UsersController : ControllerBase
             user.AnswersCount,
             user.AvailableQuestionTokens
         ));
+    }
+
+    /// <summary>
+    /// Оновити дані профілю авторизованого користувача
+    /// (UserId, UserType, AnswersCount та AvailableQuestionTokens не змінюються).
+    /// </summary>
+    [Authorize]
+    [HttpPut("profile")]
+    [ProducesResponseType(typeof(UserProfileResponseDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public async Task<ActionResult<UserProfileResponseDto>> UpdateProfile([FromBody] UpdateUserProfileRequest request)
+    {
+        var currentUserIdClaim = User.FindFirstValue(ClaimTypes.NameIdentifier) ?? User.FindFirstValue("sub");
+        if (string.IsNullOrEmpty(currentUserIdClaim) || !Guid.TryParse(currentUserIdClaim, out Guid userId))
+        {
+            return Unauthorized(new { message = "Невалідний токен авторизації." });
+        }
+
+        var user = await _context.Users.FirstOrDefaultAsync(u => u.UserId == userId);
+        if (user == null)
+        {
+            return NotFound(new { message = "Користувача не знайдено." });
+        }
+
+        if (string.IsNullOrEmpty(user.PasswordHash))
+        {
+            return BadRequest(new { message = "Спочатку завершіть реєстрацію акаунта." });
+        }
+
+        var trimmedNickname = request.Nickname.Trim();
+
+        if (!string.Equals(user.Nickname, trimmedNickname, StringComparison.Ordinal))
+        {
+            var nicknameTaken = await _context.Users
+                .AnyAsync(u => u.UserId != userId
+                            && u.Nickname != null
+                            && u.Nickname.ToLower() == trimmedNickname.ToLower());
+
+            if (nicknameTaken)
+            {
+                return Conflict(new { message = "Цей нікнейм уже зайнятий іншим користувачем." });
+            }
+        }
+
+        var regionExists = await _context.Regions.AnyAsync(r => r.RegionId == request.RegionId);
+        var occupationExists = await _context.Occupations.AnyAsync(o => o.OccupationId == request.OccupationId);
+        var hobbyExists = await _context.Hobbies.AnyAsync(h => h.HobbyId == request.HobbyId);
+
+        if (!regionExists || !occupationExists || !hobbyExists)
+        {
+            return BadRequest(new { message = "Вказано неіснуючий регіон, професію або хобі." });
+        }
+
+        user.Nickname = trimmedNickname;
+        user.Gender = request.Gender;
+        user.BirthYear = request.BirthYear;
+        user.OccupationId = request.OccupationId;
+        user.RegionId = request.RegionId;
+        user.HobbyId = request.HobbyId;
+
+        await _context.SaveChangesAsync();
+
+        var updatedProfile = await _context.Users
+            .AsNoTracking()
+            .Where(u => u.UserId == userId)
+            .Select(u => new UserProfileResponseDto(
+                u.UserId,
+                u.UserType,
+                u.Nickname,
+                u.Gender,
+                u.BirthYear,
+                u.RegionId,
+                u.Region != null ? u.Region.RegionName : null,
+                u.OccupationId,
+                u.Occupation != null ? u.Occupation.OccupationName : null,
+                u.HobbyId,
+                u.Hobby != null ? u.Hobby.HobbyName : null,
+                u.AnswersCount,
+                u.AvailableQuestionTokens
+            ))
+            .FirstAsync();
+
+        return Ok(updatedProfile);
+    }
+
+    /// <summary>
+    /// Окремий ендпоінт для зміни пароля авторизованого користувача.
+    /// </summary>
+    [Authorize]
+    [HttpPut("password")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    public async Task<IActionResult> ChangePassword([FromBody] ChangePasswordRequest request)
+    {
+        var currentUserIdClaim = User.FindFirstValue(ClaimTypes.NameIdentifier) ?? User.FindFirstValue("sub");
+        if (string.IsNullOrEmpty(currentUserIdClaim) || !Guid.TryParse(currentUserIdClaim, out Guid userId))
+        {
+            return Unauthorized(new { message = "Невалідний токен авторизації." });
+        }
+
+        if (request.CurrentPassword == request.NewPassword)
+        {
+            return BadRequest(new { message = "Новий пароль має відрізнятися від поточного." });
+        }
+
+        var user = await _context.Users.FirstOrDefaultAsync(u => u.UserId == userId);
+        if (user == null || string.IsNullOrEmpty(user.PasswordHash))
+        {
+            return BadRequest(new { message = "Користувача не знайдено або акаунт не зареєстровано." });
+        }
+
+        if (!VerifyPassword(request.CurrentPassword, user.PasswordHash))
+        {
+            return BadRequest(new { message = "Невірний поточний пароль." });
+        }
+
+        user.PasswordHash = HashPassword(request.NewPassword);
+        await _context.SaveChangesAsync();
+
+        return Ok(new { message = "Пароль успішно змінено." });
     }
 
     // --- Допоміжні методи ---

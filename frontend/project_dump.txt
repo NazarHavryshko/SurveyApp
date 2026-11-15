@@ -1,0 +1,1484 @@
+﻿
+==================== F:\University\MySurveyApp\frontend\src\api\apiClient.ts ====================
+import axios from 'axios';
+
+export const DEVICE_ID_KEY = 'mysurvey_device_id';
+export const ANON_TOKEN_KEY = 'mysurvey_anon_token';
+export const ANON_REGISTERED_KEY = 'mysurvey_anon_registered';
+export const JWT_TOKEN_KEY = 'mysurvey_jwt_token';
+
+function fnv1aHash(str: string, seed: number): string {
+  let h = seed >>> 0;
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return (h >>> 0).toString(16).padStart(8, '0');
+}
+
+/**
+ * РџРѕРІРµСЂС‚Р°С” РїРѕСЃС‚С–Р№РЅРёР№ СѓРЅС–РєР°Р»СЊРЅРёР№ UUID РїСЂРёСЃС‚СЂРѕСЋ/Р±СЂР°СѓР·РµСЂР°, СЏРєРёР№ РЅРµ Р·РјС–РЅСЋС”С‚СЊСЃСЏ.
+ */
+export function getPersistentDeviceId(): string {
+  const cached = localStorage.getItem(DEVICE_ID_KEY);
+  if (cached) return cached;
+
+  const signature = [
+    navigator.userAgent,
+    navigator.language,
+    `${screen.width}x${screen.height}`,
+    screen.colorDepth,
+    Intl.DateTimeFormat().resolvedOptions().timeZone,
+    navigator.hardwareConcurrency ?? '0',
+    navigator.platform ?? '',
+  ].join('|');
+
+  const p1 = fnv1aHash(signature, 0x811c9dc5);
+  const p2 = fnv1aHash(signature, 0x01000193);
+  const p3 = fnv1aHash(signature, 0x1b873593);
+  const p4 = fnv1aHash(signature, 0x85ebca6b);
+
+  // Р¤РѕСЂРјР°С‚ РІР°Р»С–РґРЅРѕРіРѕ UUIDv4 РґР»СЏ СЃСѓРјС–СЃРЅРѕСЃС‚С– Р· Guid Сѓ C#
+  const deviceUuid = `${p1}-${p2.slice(0, 4)}-4${p2.slice(5, 8)}-a${p3.slice(1, 4)}-${p3.slice(4, 8)}${p4}`;
+
+  localStorage.setItem(DEVICE_ID_KEY, deviceUuid);
+  return deviceUuid;
+}
+
+export const apiClient = axios.create({
+  baseURL: '/api',
+  headers: {
+    'Content-Type': 'application/json',
+  },
+});
+
+apiClient.interceptors.request.use((config) => {
+  const jwt = localStorage.getItem(JWT_TOKEN_KEY);
+  const anonToken = localStorage.getItem(ANON_TOKEN_KEY) || getPersistentDeviceId();
+
+  if (jwt) {
+    config.headers.Authorization = `Bearer ${jwt}`;
+  }
+  config.headers['X-Anonymous-Token'] = anonToken;
+
+  return config;
+});
+
+/**
+ * РџРµСЂРµРІС–СЂСЏС”, С‡Рё РІР¶Рµ СЃС‚РІРѕСЂРµРЅРѕ Р°РЅРѕРЅС–РјРЅРёР№ РїСЂРѕС„С–Р»СЊ РЅР° РїСЂРёСЃС‚СЂРѕС—.
+ * РЇРєС‰Рѕ РЅС– вЂ” РЅР°РґСЃРёР»Р°С” Р·Р°РїРёС‚ РЅР° СЂРµС”СЃС‚СЂР°С†С–СЋ Р°РЅРѕРЅС–РјРЅРѕРіРѕ РєРѕСЂРёСЃС‚СѓРІР°С‡Р° С‚Р° Р·Р±РµСЂС–РіР°С” СЂРµР·СѓР»СЊС‚Р°С‚.
+ */
+export async function ensureAnonymousSession(): Promise<{
+  deviceId: string;
+  isRegistered: boolean;
+  fromCache: boolean;
+}> {
+  const deviceId = getPersistentDeviceId();
+  const hasJwt = Boolean(localStorage.getItem(JWT_TOKEN_KEY));
+  const alreadyRegistered = localStorage.getItem(ANON_REGISTERED_KEY) === 'true';
+
+  if (hasJwt || alreadyRegistered) {
+    if (!localStorage.getItem(ANON_TOKEN_KEY)) {
+      localStorage.setItem(ANON_TOKEN_KEY, deviceId);
+    }
+    return { deviceId, isRegistered: true, fromCache: true };
+  }
+
+  try {
+    const res = await apiClient.post('/auth/anonymous', {
+      deviceId,
+      anonymousToken: deviceId,
+    });
+
+    const returnedToken =
+      res.data?.anonymousToken || res.data?.userId || res.data?.token || deviceId;
+
+    localStorage.setItem(ANON_TOKEN_KEY, String(returnedToken));
+    localStorage.setItem(ANON_REGISTERED_KEY, 'true');
+
+    return { deviceId, isRegistered: true, fromCache: false };
+  } catch {
+    // Р—Р±РµСЂС–РіР°С”РјРѕ Р»РѕРєР°Р»СЊРЅРёР№ С‚РѕРєРµРЅ РїСЂРёСЃС‚СЂРѕСЋ, С‰РѕР± РЅРµ Р±Р»РѕРєСѓРІР°С‚Рё РєРѕСЂРёСЃС‚СѓРІР°С‡Р°
+    localStorage.setItem(ANON_TOKEN_KEY, deviceId);
+    return { deviceId, isRegistered: false, fromCache: false };
+  }
+}
+
+==================== F:\University\MySurveyApp\frontend\src\components\Navbar.tsx ====================
+import { Link, useLocation } from 'react-router-dom';
+import {
+  BarChart3,
+  SlidersHorizontal,
+  User,
+  FolderKanban,
+  LogIn,
+  Home,
+} from 'lucide-react';
+import { ThemeSwitcher } from './ThemeSwitcher';
+
+export function Navbar() {
+  const location = useLocation();
+  const isAuthenticated = Boolean(localStorage.getItem('mysurvey_jwt_token'));
+
+  const isActive = (path: string) => location.pathname === path;
+
+  return (
+    <>
+      {/* Р’РµСЂС…РЅСЏ РїР°РЅРµР»СЊ (Р”РµСЃРєС‚РѕРї + РњРѕР±С–Р»СЊРЅР° С€Р°РїРєР° Р· Р»РѕРіРѕС‚РёРїРѕРј С‚Р° РїРµСЂРµРјРёРєР°С‡РµРј С‚РµРј) */}
+      <header className="bg-card border-b border-line sticky top-0 z-40">
+        <div className="max-w-6xl mx-auto px-4 h-16 flex items-center justify-between gap-3">
+          <Link to="/" className="flex items-center gap-2 text-lg sm:text-xl font-bold text-main shrink-0">
+            <BarChart3 className="w-6 h-6 text-accent" />
+            <span>MySurveyApp</span>
+          </Link>
+
+          {/* Р”РµСЃРєС‚РѕРїРЅРµ РјРµРЅСЋ */}
+          <nav className="hidden md:flex items-center gap-2 text-sm">
+            <Link
+              to="/surveys"
+              className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl font-medium transition ${
+                isActive('/surveys')
+                  ? 'bg-accent text-accent-text'
+                  : 'text-muted hover:text-main hover:bg-app'
+              }`}
+            >
+              <SlidersHorizontal className="w-4 h-4" />
+              <span>РџСЂРѕР№С‚Рё РѕРїРёС‚СѓРІР°РЅРЅСЏ</span>
+            </Link>
+
+            {isAuthenticated ? (
+              <>
+                <Link
+                  to="/profile#my-surveys"
+                  className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-muted hover:text-main hover:bg-app transition"
+                >
+                  <FolderKanban className="w-4 h-4" />
+                  <span>РњРѕС— РѕРїРёС‚СѓРІР°РЅРЅСЏ</span>
+                </Link>
+                <Link
+                  to="/profile"
+                  className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl font-medium transition ${
+                    isActive('/profile')
+                      ? 'bg-accent text-accent-text'
+                      : 'text-muted hover:text-main hover:bg-app'
+                  }`}
+                >
+                  <User className="w-4 h-4" />
+                  <span>РџСЂРѕС„С–Р»СЊ</span>
+                </Link>
+              </>
+            ) : (
+              <Link
+                to="/auth"
+                className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl font-medium transition ${
+                  isActive('/auth')
+                    ? 'bg-accent text-accent-text'
+                    : 'text-muted hover:text-main hover:bg-app'
+                }`}
+              >
+                <LogIn className="w-4 h-4" />
+                <span>РђРІС‚РѕСЂРёР·Р°С†С–СЏ / Р РµС”СЃС‚СЂР°С†С–СЏ</span>
+              </Link>
+            )}
+          </nav>
+
+          {/* РџРµСЂРµРјРёРєР°С‡ 3 РєРѕР»С–СЂРЅРёС… СЃС…РµРј */}
+          <ThemeSwitcher />
+        </div>
+      </header>
+
+      {/* РќРёР¶РЅСЏ РїР°РЅРµР»СЊ РЅР°РІС–РіР°С†С–С— РґР»СЏ РјРѕР±С–Р»СЊРЅРёС… РїСЂРёСЃС‚СЂРѕС—РІ */}
+      <nav className="md:hidden fixed bottom-0 inset-x-0 z-40 bg-card border-t border-line px-2 py-1.5 flex justify-around items-center text-[11px]">
+        <Link
+          to="/"
+          className={`flex flex-col items-center gap-1 py-1 px-3 rounded-lg ${
+            isActive('/') ? 'text-accent font-semibold' : 'text-muted'
+          }`}
+        >
+          <Home className="w-5 h-5" />
+          <span>Р“РѕР»РѕРІРЅР°</span>
+        </Link>
+
+        <Link
+          to="/surveys"
+          className={`flex flex-col items-center gap-1 py-1 px-3 rounded-lg ${
+            isActive('/surveys') ? 'text-accent font-semibold' : 'text-muted'
+          }`}
+        >
+          <SlidersHorizontal className="w-5 h-5" />
+          <span>РћРїРёС‚СѓРІР°РЅРЅСЏ</span>
+        </Link>
+
+        {isAuthenticated ? (
+          <>
+            <Link
+              to="/profile#my-surveys"
+              className="flex flex-col items-center gap-1 py-1 px-3 rounded-lg text-muted"
+            >
+              <FolderKanban className="w-5 h-5" />
+              <span>РњРѕС—</span>
+            </Link>
+            <Link
+              to="/profile"
+              className={`flex flex-col items-center gap-1 py-1 px-3 rounded-lg ${
+                isActive('/profile') ? 'text-accent font-semibold' : 'text-muted'
+              }`}
+            >
+              <User className="w-5 h-5" />
+              <span>РџСЂРѕС„С–Р»СЊ</span>
+            </Link>
+          </>
+        ) : (
+          <Link
+            to="/auth"
+            className={`flex flex-col items-center gap-1 py-1 px-3 rounded-lg ${
+              isActive('/auth') ? 'text-accent font-semibold' : 'text-muted'
+            }`}
+          >
+            <LogIn className="w-5 h-5" />
+            <span>РЈРІС–Р№С‚Рё</span>
+          </Link>
+        )}
+      </nav>
+    </>
+  );
+}
+
+==================== F:\University\MySurveyApp\frontend\src\components\SurveyChart.tsx ====================
+
+==================== F:\University\MySurveyApp\frontend\src\components\ThemeSwitcher.tsx ====================
+import { useEffect, useState } from 'react';
+import { Palette } from 'lucide-react';
+
+export type ThemeId = 'ocean' | 'blitz' | 'daylight';
+
+const THEMES: { id: ThemeId; name: string; dotColor: string }[] = [
+  { id: 'ocean', name: 'РћРєРµР°РЅ', dotColor: '#2563EB' },
+  { id: 'blitz', name: 'Р‘Р»С–С†', dotColor: '#E91E63' },
+  { id: 'daylight', name: 'Р”РµРЅСЊ', dotColor: '#F8FAFC' },
+];
+
+const THEME_STORAGE_KEY = 'mysurvey_theme';
+
+export function ThemeSwitcher() {
+  const [theme, setTheme] = useState<ThemeId>(() => {
+    return (localStorage.getItem(THEME_STORAGE_KEY) as ThemeId) || 'ocean';
+  });
+
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme);
+    localStorage.setItem(THEME_STORAGE_KEY, theme);
+  }, [theme]);
+
+  return (
+    <div className="flex items-center gap-1.5 bg-app border border-line rounded-xl p-1">
+      <Palette className="w-4 h-4 text-muted ml-1.5 hidden sm:block" />
+      {THEMES.map((t) => {
+        const active = theme === t.id;
+        return (
+          <button
+            key={t.id}
+            type="button"
+            onClick={() => setTheme(t.id)}
+            title={`РљРѕР»С–СЂРЅР° СЃС…РµРјР°: ${t.name}`}
+            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium transition cursor-pointer ${
+              active
+                ? 'bg-accent text-accent-text shadow-sm'
+                : 'text-muted hover:text-main'
+            }`}
+          >
+            <span
+              className="w-2.5 h-2.5 rounded-full border border-black/20 shrink-0"
+              style={{ backgroundColor: t.dotColor }}
+            />
+            <span>{t.name}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+==================== F:\University\MySurveyApp\frontend\src\pages\AuthPage.tsx ====================
+import { useState } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import { apiClient, getOrCreateAnonymousToken } from '../api/apiClient';
+
+export function AuthPage() {
+  const [searchParams] = useSearchParams();
+  const [isRegister, setIsRegister] = useState(searchParams.get('mode') === 'register');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [gender, setGender] = useState('Р§');
+  const [birthYear, setBirthYear] = useState(2004);
+  const [regionId, setRegionId] = useState(19); // РўРµСЂРЅРѕРїС–Р»СЊСЃСЊРєР° РѕР±Р»Р°СЃС‚СЊ
+  const [error, setError] = useState('');
+  const navigate = useNavigate();
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+
+    try {
+      const endpoint = isRegister ? '/auth/register' : '/auth/login';
+      const payload = isRegister
+        ? {
+            email,
+            password,
+            gender,
+            birthYear,
+            regionId,
+            anonymousToken: getOrCreateAnonymousToken(),
+          }
+        : { email, password };
+
+      const res = await apiClient.post(endpoint, payload);
+      const token = res.data.token || res.data.accessToken;
+      if (token) {
+        localStorage.setItem('mysurvey_jwt_token', token);
+      }
+      navigate('/profile');
+    } catch (err: any) {
+      setError(err.response?.data?.message || 'РќРµ РІРґР°Р»РѕСЃСЏ РІРёРєРѕРЅР°С‚Рё РІС…С–Рґ. РџРµСЂРµРІС–СЂС‚Рµ РґР°РЅС–.');
+    }
+  };
+
+  return (
+    <div className="max-w-md mx-auto bg-slate-900 border border-slate-800 rounded-2xl p-6 sm:p-8 space-y-6">
+      <div className="flex border-b border-slate-800">
+        <button
+          type="button"
+          onClick={() => setIsRegister(false)}
+          className={`flex-1 pb-3 text-sm font-semibold border-b-2 transition ${
+            !isRegister ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-400'
+          }`}
+        >
+          РђРІС‚РѕСЂРёР·Р°С†С–СЏ
+        </button>
+        <button
+          type="button"
+          onClick={() => setIsRegister(true)}
+          className={`flex-1 pb-3 text-sm font-semibold border-b-2 transition ${
+            isRegister ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-400'
+          }`}
+        >
+          Р РµС”СЃС‚СЂР°С†С–СЏ
+        </button>
+      </div>
+
+      {error && (
+        <div className="p-3 rounded-lg bg-rose-950/60 border border-rose-800 text-rose-300 text-sm">
+          {error}
+        </div>
+      )}
+
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <div>
+          <label className="block text-xs text-slate-400 mb-1">Email</label>
+          <input
+            type="email"
+            required
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 focus:border-blue-500 outline-none"
+          />
+        </div>
+
+        <div>
+          <label className="block text-xs text-slate-400 mb-1">РџР°СЂРѕР»СЊ</label>
+          <input
+            type="password"
+            required
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 focus:border-blue-500 outline-none"
+          />
+        </div>
+
+        {isRegister && (
+          <>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs text-slate-400 mb-1">РЎС‚Р°С‚СЊ</label>
+                <select
+                  value={gender}
+                  onChange={(e) => setGender(e.target.value)}
+                  className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800"
+                >
+                  <option value="Р§">Р§РѕР»РѕРІС–С‡Р°</option>
+                  <option value="Р–">Р–С–РЅРѕС‡Р°</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs text-slate-400 mb-1">Р С–Рє РЅР°СЂРѕРґР¶РµРЅРЅСЏ</label>
+                <input
+                  type="number"
+                  min={1940}
+                  max={2015}
+                  value={birthYear}
+                  onChange={(e) => setBirthYear(Number(e.target.value))}
+                  className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">ID Р РµРіС–РѕРЅСѓ</label>
+              <input
+                type="number"
+                min={1}
+                max={27}
+                value={regionId}
+                onChange={(e) => setRegionId(Number(e.target.value))}
+                className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800"
+              />
+            </div>
+          </>
+        )}
+
+        <button
+          type="submit"
+          className="w-full py-2.5 rounded-lg bg-blue-700 hover:bg-blue-600 font-semibold transition"
+        >
+          {isRegister ? 'РЎС‚РІРѕСЂРёС‚Рё Р°РєР°СѓРЅС‚' : 'РЈРІС–Р№С‚Рё РІ РєР°Р±С–РЅРµС‚'}
+        </button>
+      </form>
+    </div>
+  );
+}
+
+==================== F:\University\MySurveyApp\frontend\src\pages\CreateSurveyPage.tsx ====================
+export function CreateSurveyPage() { return <div className='bg-card border border-line rounded-2xl p-6 text-main'>Сторінка CreateSurveyPage у розробці</div>; }
+
+
+==================== F:\University\MySurveyApp\frontend\src\pages\HomePage.tsx ====================
+import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
+import {
+  SlidersHorizontal,
+  User,
+  FolderKanban,
+  LogIn,
+  UserPlus,
+  ArrowRight,
+  Sparkles,
+} from 'lucide-react';
+import { apiClient } from '../api/apiClient';
+
+type AuthStatus = 'checking' | 'authenticated' | 'guest';
+
+export function HomePage() {
+  const [authStatus, setAuthStatus] = useState<AuthStatus>('checking');
+  const [userEmail, setUserEmail] = useState<string>('');
+
+  useEffect(() => {
+    const token = localStorage.getItem('mysurvey_jwt_token');
+
+    if (!token) {
+      setAuthStatus('guest');
+      return;
+    }
+
+    apiClient
+      .get('/users/me')
+      .then((res) => {
+        setUserEmail(res.data?.email || '');
+        setAuthStatus('authenticated');
+      })
+      .catch((err) => {
+        if (err.response?.status === 401 || err.response?.status === 403) {
+          localStorage.removeItem('mysurvey_jwt_token');
+          setAuthStatus('guest');
+        } else {
+          // РЇРєС‰Рѕ Р±РµРєРµРЅРґ С‰Рµ Сѓ СЂРѕР·СЂРѕР±С†С–, Р°Р»Рµ С‚РѕРєРµРЅ С” вЂ” Р·Р°Р»РёС€Р°С”РјРѕ СЃС‚Р°РЅ Р°РІС‚РѕСЂРёР·РѕРІР°РЅРёРј
+          setAuthStatus('authenticated');
+        }
+      });
+  }, []);
+
+  return (
+    <div className="space-y-6 md:space-y-10">
+      {/* Р“РѕР»РѕРІРЅРёР№ Р±Р»РѕРє (Hero) */}
+      <section className="bg-card border border-line rounded-2xl p-6 sm:p-8 md:p-12 shadow-sm">
+        <div className="max-w-3xl space-y-4 md:space-y-6">
+          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-app border border-line text-xs font-medium text-highlight">
+            <Sparkles className="w-3.5 h-3.5" />
+            <span>
+              {authStatus === 'authenticated'
+                ? `Р’Рё СѓРІС–Р№С€Р»Рё${userEmail ? `: ${userEmail}` : ''}`
+                : 'РЁРІРёРґРєС– РѕРїРёС‚СѓРІР°РЅРЅСЏ С‚Р° Р°РЅР°Р»С–С‚РёРєР° РІ СЂРµР°Р»СЊРЅРѕРјСѓ С‡Р°СЃС–'}
+            </span>
+          </div>
+
+          <h1 className="text-2xl sm:text-3xl md:text-4xl font-bold text-main leading-tight">
+            РћР±РёСЂР°Р№С‚Рµ С†С–РєР°РІС– С‚РµРјРё, РІС–РґРїРѕРІС–РґР°Р№С‚Рµ Р·Р° СЃРµРєСѓРЅРґРё С‚Р° РґРѕСЃР»С–РґР¶СѓР№С‚Рµ СЃС‚Р°С‚РёСЃС‚РёРєСѓ
+          </h1>
+
+          <p className="text-sm sm:text-base text-muted max-w-2xl">
+            РџРµСЂРµР№РґС–С‚СЊ РґРѕ С„С–Р»СЊС‚СЂР° РѕРїРёС‚СѓРІР°РЅСЊ, С‰РѕР± РїС–РґС–Р±СЂР°С‚Рё РїРёС‚Р°РЅРЅСЏ Р·Р° СЃС„РµСЂРѕСЋ РґС–СЏР»СЊРЅРѕСЃС‚С–, СЂРµРіС–РѕРЅРѕРј С‡Рё СЃС‚Р°С‚СѓСЃРѕРј, Р°Р±Рѕ РїРµСЂРµРіР»СЏРЅСЊС‚Рµ СЂРµР·СѓР»СЊС‚Р°С‚Рё РІР¶Рµ Р·Р°РІРµСЂС€РµРЅРёС… РґРѕСЃР»С–РґР¶РµРЅСЊ.
+          </p>
+
+          {/* РћСЃРЅРѕРІРЅР° РєРЅРѕРїРєР° вЂ” РІРµРґРµ РЅР° СЃС‚РѕСЂС–РЅРєСѓ С„С–Р»СЊС‚СЂР° РѕРїРёС‚СѓРІР°РЅСЊ (/surveys) */}
+          <div className="pt-2 flex flex-col sm:flex-row gap-3">
+            <Link
+              to="/surveys"
+              className="w-full sm:w-auto inline-flex items-center justify-center gap-2.5 px-6 py-3.5 rounded-xl bg-accent hover:bg-accent-hover text-accent-text font-semibold text-base transition shadow-sm"
+            >
+              <SlidersHorizontal className="w-5 h-5" />
+              <span>РџСЂРѕР№С‚Рё РѕРїРёС‚СѓРІР°РЅРЅСЏ</span>
+              <ArrowRight className="w-4 h-4" />
+            </Link>
+          </div>
+        </div>
+      </section>
+
+      {/* РЎРµРєС†С–СЏ РґС–Р№ Р·Р°Р»РµР¶РЅРѕ РІС–Рґ РїРµСЂРµРІС–СЂРєРё Р°РІС‚РѕСЂРёР·Р°С†С–С— */}
+      {authStatus === 'checking' ? (
+        <section className="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-6">
+          {[1, 2, 3].map((i) => (
+            <div
+              key={i}
+              className="h-44 rounded-2xl bg-card border border-line animate-pulse"
+            />
+          ))}
+        </section>
+      ) : authStatus === 'authenticated' ? (
+        /* Р’Р°СЂС–Р°РЅС‚ 1: РљРѕСЂРёСЃС‚СѓРІР°С‡ РђР’РўРћР РР—РћР’РђРќРР™ */
+        <section className="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-6">
+          {/* РљР°СЂС‚РєР° 1: РџСЂРѕС…РѕРґР¶РµРЅРЅСЏ РѕРїРёС‚СѓРІР°РЅРЅСЏ -> Р¤С–Р»СЊС‚СЂ */}
+          <div className="bg-card border border-line rounded-2xl p-5 sm:p-6 flex flex-col justify-between gap-5">
+            <div className="space-y-2">
+              <div className="w-10 h-10 rounded-xl bg-app border border-line flex items-center justify-center text-accent">
+                <SlidersHorizontal className="w-5 h-5" />
+              </div>
+              <h2 className="text-lg font-semibold text-main">РџСЂРѕР№С‚Рё РѕРїРёС‚СѓРІР°РЅРЅСЏ</h2>
+              <p className="text-sm text-muted">
+                Р’С–РґРєСЂРёР№С‚Рµ РєР°С‚Р°Р»РѕРі С–Р· С„С–Р»СЊС‚СЂР°РјРё Р·Р° СЃС„РµСЂР°РјРё, С‚РµРјР°РјРё С‚Р° СЂРµРіС–РѕРЅР°РјРё РґР»СЏ РІРёР±РѕСЂСѓ РѕРїРёС‚СѓРІР°РЅРЅСЏ.
+              </p>
+            </div>
+            <Link
+              to="/surveys"
+              className="w-full inline-flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-accent hover:bg-accent-hover text-accent-text text-sm font-semibold transition"
+            >
+              <span>РџРµСЂРµР№С‚Рё РґРѕ С„С–Р»СЊС‚СЂР°</span>
+              <ArrowRight className="w-4 h-4" />
+            </Link>
+          </div>
+
+          {/* РљР°СЂС‚РєР° 2: Р’С–РґРєСЂРёС‚Рё РїСЂРѕС„С–Р»СЊ */}
+          <div className="bg-card border border-line rounded-2xl p-5 sm:p-6 flex flex-col justify-between gap-5">
+            <div className="space-y-2">
+              <div className="w-10 h-10 rounded-xl bg-app border border-line flex items-center justify-center text-highlight">
+                <User className="w-5 h-5" />
+              </div>
+              <h2 className="text-lg font-semibold text-main">Р’С–РґРєСЂРёС‚Рё РїСЂРѕС„С–Р»СЊ</h2>
+              <p className="text-sm text-muted">
+                РћСЃРѕР±РёСЃС‚РёР№ РєР°Р±С–РЅРµС‚, РІР°С€С– РґРµРјРѕРіСЂР°С„С–С‡РЅС– РїР°СЂР°РјРµС‚СЂРё С‚Р° РїСЂРѕРіСЂРµСЃ РїСЂРѕР№РґРµРЅРёС… РѕРїРёС‚СѓРІР°РЅСЊ.
+              </p>
+            </div>
+            <Link
+              to="/profile"
+              className="w-full inline-flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-app hover:border-accent border border-line text-main text-sm font-semibold transition"
+            >
+              <span>РњС–Р№ РїСЂРѕС„С–Р»СЊ</span>
+              <ArrowRight className="w-4 h-4" />
+            </Link>
+          </div>
+
+          {/* РљР°СЂС‚РєР° 3: РџРѕРґРёРІРёС‚РёСЃСЏ СЃРІРѕС— РѕРїРёС‚СѓРІР°РЅРЅСЏ */}
+          <div className="bg-card border border-line rounded-2xl p-5 sm:p-6 flex flex-col justify-between gap-5">
+            <div className="space-y-2">
+              <div className="w-10 h-10 rounded-xl bg-app border border-line flex items-center justify-center text-accent">
+                <FolderKanban className="w-5 h-5" />
+              </div>
+              <h2 className="text-lg font-semibold text-main">РџРѕРґРёРІРёС‚РёСЃСЏ СЃРІРѕС— РѕРїРёС‚СѓРІР°РЅРЅСЏ</h2>
+              <p className="text-sm text-muted">
+                РљРµСЂСѓР№С‚Рµ СЃС‚РІРѕСЂРµРЅРёРјРё РїРёС‚Р°РЅРЅСЏРјРё, РїРµСЂРµРІС–СЂСЏР№С‚Рµ СЃС‚Р°С‚СѓСЃ РјРѕРґРµСЂР°С†С–С— С‚Р° РїРµСЂРµРіР»СЏРґР°Р№С‚Рµ Р°РЅР°Р»С–С‚РёРєСѓ.
+              </p>
+            </div>
+            <Link
+              to="/profile#my-surveys"
+              className="w-full inline-flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-app hover:border-accent border border-line text-main text-sm font-semibold transition"
+            >
+              <span>РњРѕС— РѕРїРёС‚СѓРІР°РЅРЅСЏ</span>
+              <ArrowRight className="w-4 h-4" />
+            </Link>
+          </div>
+        </section>
+      ) : (
+        /* Р’Р°СЂС–Р°РЅС‚ 2: РљРѕСЂРёСЃС‚СѓРІР°С‡ РќР• Р°РІС‚РѕСЂРёР·РѕРІР°РЅРёР№ */
+        <section className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
+          {/* РљР°СЂС‚РєР° РђРІС‚РѕСЂРёР·Р°С†С–С— */}
+          <div className="bg-card border border-line rounded-2xl p-5 sm:p-6 flex flex-col justify-between gap-5">
+            <div className="space-y-2">
+              <div className="w-10 h-10 rounded-xl bg-app border border-line flex items-center justify-center text-accent">
+                <LogIn className="w-5 h-5" />
+              </div>
+              <h2 className="text-lg font-semibold text-main">РђРІС‚РѕСЂРёР·Р°С†С–СЏ</h2>
+              <p className="text-sm text-muted">
+                РЈРІС–Р№РґС–С‚СЊ Сѓ СЃРІС–Р№ Р°РєР°СѓРЅС‚, С‰РѕР± РІС–РґРєСЂРёС‚Рё РѕСЃРѕР±РёСЃС‚РёР№ РєР°Р±С–РЅРµС‚, С–СЃС‚РѕСЂС–СЋ РІС–РґРїРѕРІС–РґРµР№ С‚Р° РІР»Р°СЃРЅС– РѕРїРёС‚СѓРІР°РЅРЅСЏ.
+              </p>
+            </div>
+            <Link
+              to="/auth?mode=login"
+              className="w-full inline-flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-app hover:border-accent border border-line text-main text-sm font-semibold transition"
+            >
+              <span>РЈРІС–Р№С‚Рё РІ Р°РєР°СѓРЅС‚</span>
+              <ArrowRight className="w-4 h-4" />
+            </Link>
+          </div>
+
+          {/* РљР°СЂС‚РєР° Р РµС”СЃС‚СЂР°С†С–С— */}
+          <div className="bg-card border border-line rounded-2xl p-5 sm:p-6 flex flex-col justify-between gap-5">
+            <div className="space-y-2">
+              <div className="w-10 h-10 rounded-xl bg-app border border-line flex items-center justify-center text-highlight">
+                <UserPlus className="w-5 h-5" />
+              </div>
+              <h2 className="text-lg font-semibold text-main">Р РµС”СЃС‚СЂР°С†С–СЏ</h2>
+              <p className="text-sm text-muted">
+                РЎС‚РІРѕСЂС–С‚СЊ РѕР±Р»С–РєРѕРІРёР№ Р·Р°РїРёСЃ, С‰РѕР± РЅР°РєРѕРїРёС‡СѓРІР°С‚Рё РІС–РґРїРѕРІС–РґС– С‚Р° РїСѓР±Р»С–РєСѓРІР°С‚Рё РІР»Р°СЃРЅС– РѕРїРёС‚СѓРІР°РЅРЅСЏ РґР»СЏ СЃРїС–Р»СЊРЅРѕС‚Рё.
+              </p>
+            </div>
+            <Link
+              to="/auth?mode=register"
+              className="w-full inline-flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-accent hover:bg-accent-hover text-accent-text text-sm font-semibold transition"
+            >
+              <span>Р—Р°СЂРµС”СЃС‚СЂСѓРІР°С‚РёСЃСЏ</span>
+              <ArrowRight className="w-4 h-4" />
+            </Link>
+          </div>
+        </section>
+      )}
+    </div>
+  );
+}
+
+==================== F:\University\MySurveyApp\frontend\src\pages\MySurveyDetailsPage.tsx ====================
+export function MySurveyDetailsPage() { return <div className='bg-card border border-line rounded-2xl p-6 text-main'>Сторінка MySurveyDetailsPage у розробці</div>; }
+
+
+==================== F:\University\MySurveyApp\frontend\src\pages\ProfilePage.tsx ====================
+export function ProfilePage() { return <div className='bg-card border border-line rounded-2xl p-6 text-main'>Сторінка ProfilePage у розробці</div>; }
+
+
+==================== F:\University\MySurveyApp\frontend\src\pages\SurveyAnalysisPage.tsx ====================
+export function SurveyAnalysisPage() { return <div className='bg-card border border-line rounded-2xl p-6 text-main'>Сторінка SurveyAnalysisPage у розробці</div>; }
+
+
+==================== F:\University\MySurveyApp\frontend\src\pages\SurveysFilterPage.tsx ====================
+import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import {
+  Layers,
+  Tag,
+  Sliders,
+  Play,
+  ShieldCheck,
+  RotateCcw,
+  CheckCircle2,
+  Shuffle,
+} from 'lucide-react';
+import { apiClient, ensureAnonymousSession } from '../api/apiClient';
+import type {
+  PreferredTopicCount,
+  SavedSurveyFilters,
+  SurveyDomain,
+  SurveyTopic,
+} from '../types/survey';
+
+export const SAVED_FILTERS_KEY = 'mysurvey_survey_filters';
+
+const SLIDER_SECTIONS: {
+  preferred: PreferredTopicCount;
+  random: number;
+  label: string;
+  hint: string;
+}[] = [
+  { preferred: 5, random: 5, label: '5 / 5', hint: 'Р С–РІРЅРёР№ Р±Р°Р»Р°РЅСЃ С‚РµРјРё С‚Р° РІРёРїР°РґРєРѕРІРёС… РїРёС‚Р°РЅСЊ' },
+  { preferred: 6, random: 4, label: '6 / 4', hint: 'РџРѕРјС–СЂРЅРёР№ С„РѕРєСѓСЃ РЅР° РѕР±СЂР°РЅС–Р№ С‚РµРјС–' },
+  { preferred: 7, random: 3, label: '7 / 3', hint: 'РџРѕРіР»РёР±Р»РµРЅРµ РїСЂРѕС…РѕРґР¶РµРЅРЅСЏ РѕР±СЂР°РЅРѕС— С‚РµРјРё' },
+  { preferred: 8, random: 2, label: '8 / 2', hint: 'РњР°РєСЃРёРјР°Р»СЊРЅРёР№ Р°РєС†РµРЅС‚ РЅР° РѕР±СЂР°РЅС–Р№ С‚РµРјС–' },
+];
+
+export function SurveysFilterPage() {
+  const navigate = useNavigate();
+
+  // РЎС‚Р°С‚СѓСЃ Р°РЅРѕРЅС–РјРЅРѕС— СЂРµС”СЃС‚СЂР°С†С–С— РїСЂРёСЃС‚СЂРѕСЋ
+  const [deviceStatus, setDeviceStatus] = useState<'checking' | 'ready' | 'error'>('checking');
+  const [deviceId, setDeviceId] = useState<string>('');
+  const [isFromCache, setIsFromCache] = useState<boolean>(false);
+
+  // Р”РѕРІС–РґРЅРёРєРё РѕР±Р»Р°СЃС‚РµР№ С– С‚РµРј
+  const [domains, setDomains] = useState<SurveyDomain[]>([]);
+  const [topics, setTopics] = useState<SurveyTopic[]>([]);
+  const [loadingDomains, setLoadingDomains] = useState<boolean>(true);
+  const [loadingTopics, setLoadingTopics] = useState<boolean>(false);
+
+  // РћР±СЂР°РЅС– С„С–Р»СЊС‚СЂРё
+  const [selectedDomainId, setSelectedDomainId] = useState<number | ''>('');
+  const [selectedTopicId, setSelectedTopicId] = useState<number | ''>('');
+  const [pendingTopicId, setPendingTopicId] = useState<number | null>(null);
+  const [preferredCount, setPreferredCount] = useState<PreferredTopicCount>(5);
+  const [restoredFromMemory, setRestoredFromMemory] = useState<boolean>(false);
+  const [formError, setFormError] = useState<string>('');
+
+  // 1. РџСЂРё РІС…РѕРґС–: РїРµСЂРµРІС–СЂРєР° Р°РЅРѕРЅС–РјРЅРѕРіРѕ РїСЂРѕС„С–Р»СЋ РїСЂРёСЃС‚СЂРѕСЋ + РІС–РґРЅРѕРІР»РµРЅРЅСЏ Р·Р±РµСЂРµР¶РµРЅРёС… С„С–Р»СЊС‚СЂС–РІ + Р·Р°РІР°РЅС‚Р°Р¶РµРЅРЅСЏ РѕР±Р»Р°СЃС‚РµР№
+  useEffect(() => {
+    ensureAnonymousSession().then((session) => {
+      setDeviceId(session.deviceId);
+      setIsFromCache(session.fromCache);
+      setDeviceStatus(session.isRegistered ? 'ready' : 'error');
+    });
+
+    const rawSaved = localStorage.getItem(SAVED_FILTERS_KEY);
+    if (rawSaved) {
+      try {
+        const parsed: SavedSurveyFilters = JSON.parse(rawSaved);
+        if (parsed.domainId) {
+          setSelectedDomainId(parsed.domainId);
+          setPendingTopicId(parsed.topicId || null);
+        }
+        if ([5, 6, 7, 8].includes(parsed.preferredCount)) {
+          setPreferredCount(parsed.preferredCount);
+        }
+        setRestoredFromMemory(true);
+      } catch {
+        localStorage.removeItem(SAVED_FILTERS_KEY);
+      }
+    }
+
+    setLoadingDomains(true);
+    apiClient
+      .get('/domains')
+      .then((res) => {
+        const list: SurveyDomain[] = Array.isArray(res.data) ? res.data : [];
+        setDomains(list);
+      })
+      .catch(() => {
+        setDomains([]);
+      })
+      .finally(() => setLoadingDomains(false));
+  }, []);
+
+  // 2. РџС–РґРІР°РЅС‚Р°Р¶РµРЅРЅСЏ С‚РµРј РїС–СЃР»СЏ РІРёР±РѕСЂСѓ РѕР±Р»Р°СЃС‚С– РѕРїРёС‚СѓРІР°РЅРЅСЏ
+  useEffect(() => {
+    if (selectedDomainId === '') {
+      setTopics([]);
+      setSelectedTopicId('');
+      return;
+    }
+
+    setLoadingTopics(true);
+    apiClient
+      .get(`/domains/${selectedDomainId}/topics`)
+      .then((res) => {
+        const list: SurveyTopic[] = Array.isArray(res.data) ? res.data : [];
+        setTopics(list);
+
+        if (pendingTopicId && list.some((t) => t.topicId === pendingTopicId)) {
+          setSelectedTopicId(pendingTopicId);
+        } else if (list.length > 0) {
+          setSelectedTopicId(list[0].topicId);
+        } else {
+          setSelectedTopicId('');
+        }
+        setPendingTopicId(null);
+      })
+      .catch(() => {
+        setTopics([]);
+        setSelectedTopicId('');
+      })
+      .finally(() => setLoadingTopics(false));
+  }, [selectedDomainId]);
+
+  const handleDomainChange = (value: string) => {
+    setFormError('');
+    setRestoredFromMemory(false);
+    setPendingTopicId(null);
+    setSelectedDomainId(value === '' ? '' : Number(value));
+  };
+
+  const handleResetFilters = () => {
+    localStorage.removeItem(SAVED_FILTERS_KEY);
+    setSelectedDomainId('');
+    setSelectedTopicId('');
+    setTopics([]);
+    setPreferredCount(5);
+    setRestoredFromMemory(false);
+    setFormError('');
+  };
+
+  // 3. Р—Р±РµСЂРµР¶РµРЅРЅСЏ РІРёР±СЂР°РЅРёС… С„С–Р»СЊС‚СЂС–РІ Сѓ РїР°Рј'СЏС‚СЊ С‚Р° РїРµСЂРµС…С–Рґ РЅР° СЃС‚РѕСЂС–РЅРєСѓ РѕРїРёС‚СѓРІР°РЅРЅСЏ
+  const handleStartSurvey = async () => {
+    if (selectedDomainId === '' || selectedTopicId === '') {
+      setFormError('РћР±РµСЂС–С‚СЊ РѕР±Р»Р°СЃС‚СЊ РѕРїРёС‚СѓРІР°РЅРЅСЏ С‚Р° С‚РµРјСѓ РїРµСЂРµРґ РїРѕС‡Р°С‚РєРѕРј.');
+      return;
+    }
+
+    const domainObj = domains.find((d) => d.domainId === selectedDomainId);
+    const topicObj = topics.find((t) => t.topicId === selectedTopicId);
+
+    const filtersToSave: SavedSurveyFilters = {
+      domainId: Number(selectedDomainId),
+      domainName: domainObj?.domainName || '',
+      topicId: Number(selectedTopicId),
+      topicName: topicObj?.topicName || '',
+      preferredCount,
+      randomCount: 10 - preferredCount,
+      updatedAt: new Date().toISOString(),
+    };
+
+    localStorage.setItem(SAVED_FILTERS_KEY, JSON.stringify(filtersToSave));
+
+    await ensureAnonymousSession();
+    navigate('/survey/play');
+  };
+
+  const currentSection =
+    SLIDER_SECTIONS.find((s) => s.preferred === preferredCount) || SLIDER_SECTIONS[0];
+
+  return (
+    <div className="max-w-3xl mx-auto space-y-6">
+      {/* Р—Р°РіРѕР»РѕРІРѕРє С‚Р° СЃС‚Р°С‚СѓСЃ С–РґРµРЅС‚РёС„С–РєР°С‚РѕСЂР° РїСЂРёСЃС‚СЂРѕСЋ */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div>
+          <h1 className="text-2xl sm:text-3xl font-bold text-main">РќР°Р»Р°С€С‚СѓРІР°РЅРЅСЏ РѕРїРёС‚СѓРІР°РЅРЅСЏ</h1>
+          <p className="text-sm text-muted mt-1">
+            РћР±РµСЂС–С‚СЊ РЅР°РїСЂСЏРјРѕРє, С‚РµРјСѓ С‚Р° СЃРїС–РІРІС–РґРЅРѕС€РµРЅРЅСЏ РїРёС‚Р°РЅСЊ РґР»СЏ РІР°С€РѕС— СЃРµСЃС–С—
+          </p>
+        </div>
+
+        <div
+          title={deviceId ? `ID РїСЂРёСЃС‚СЂРѕСЋ: ${deviceId}` : 'РџРµСЂРµРІС–СЂРєР° РїСЂРёСЃС‚СЂРѕСЋ'}
+          className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-card border border-line text-xs text-muted self-start sm:self-auto"
+        >
+          <ShieldCheck className="w-4 h-4 text-highlight shrink-0" />
+          <span>
+            {deviceStatus === 'checking'
+              ? 'Р†РЅС–С†С–Р°Р»С–Р·Р°С†С–СЏ РїСЂРѕС„С–Р»СЋ...'
+              : isFromCache
+              ? 'РџСЂРѕС„С–Р»СЊ РїСЂРёСЃС‚СЂРѕСЋ Р°РєС‚РёРІРЅРёР№'
+              : 'РђРЅРѕРЅС–РјРЅРёР№ РїСЂРѕС„С–Р»СЊ СЃС‚РІРѕСЂРµРЅРѕ'}
+          </span>
+        </div>
+      </div>
+
+      {/* РџР»Р°С€РєР° РІС–РґРЅРѕРІР»РµРЅРёС… С„С–Р»СЊС‚СЂС–РІ */}
+      {restoredFromMemory && (
+        <div className="bg-card border border-line rounded-xl px-4 py-3 flex items-center justify-between gap-3 text-xs sm:text-sm">
+          <div className="flex items-center gap-2 text-highlight">
+            <CheckCircle2 className="w-4 h-4 shrink-0" />
+            <span>РџС–РґСЃС‚Р°РІР»РµРЅРѕ РІР°С€С– РїРѕРїРµСЂРµРґРЅС– Р·Р±РµСЂРµР¶РµРЅС– С„С–Р»СЊС‚СЂРё</span>
+          </div>
+          <button
+            type="button"
+            onClick={handleResetFilters}
+            className="inline-flex items-center gap-1 text-muted hover:text-main transition cursor-pointer shrink-0"
+          >
+            <RotateCcw className="w-3.5 h-3.5" />
+            <span>РЎРєРёРЅСѓС‚Рё</span>
+          </button>
+        </div>
+      )}
+
+      {/* РћСЃРЅРѕРІРЅР° С„РѕСЂРјР° С„С–Р»СЊС‚СЂС–РІ */}
+      <div className="bg-card border border-line rounded-2xl p-5 sm:p-8 space-y-6 shadow-sm">
+        {/* 1. Р’РёР±С–СЂ РѕР±Р»Р°СЃС‚С– РѕРїРёС‚СѓРІР°РЅРЅСЏ */}
+        <div className="space-y-2">
+          <label className="flex items-center gap-2 text-sm font-semibold text-main">
+            <Layers className="w-4 h-4 text-accent" />
+            <span>1. РћР±Р»Р°СЃС‚СЊ РѕРїРёС‚СѓРІР°РЅРЅСЏ</span>
+          </label>
+          <select
+            value={selectedDomainId}
+            disabled={loadingDomains}
+            onChange={(e) => handleDomainChange(e.target.value)}
+            className="w-full px-4 py-3 rounded-xl bg-app border border-line text-main text-sm sm:text-base focus:border-accent outline-none transition"
+          >
+            <option value="">
+              {loadingDomains ? 'Р—Р°РІР°РЅС‚Р°Р¶РµРЅРЅСЏ РѕР±Р»Р°СЃС‚РµР№...' : 'вЂ” РћР±РµСЂС–С‚СЊ РѕР±Р»Р°СЃС‚СЊ РѕРїРёС‚СѓРІР°РЅРЅСЏ вЂ”'}
+            </option>
+            {domains.map((d) => (
+              <option key={d.domainId} value={d.domainId}>
+                {d.domainName}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        {/* 2. Р’РёР±С–СЂ С‚РµРјРё (РїС–РґРІР°РЅС‚Р°Р¶СѓС”С‚СЊСЃСЏ Р· РѕР±СЂР°РЅРѕС— РѕР±Р»Р°СЃС‚С–) */}
+        <div className="space-y-2">
+          <label className="flex items-center gap-2 text-sm font-semibold text-main">
+            <Tag className="w-4 h-4 text-accent" />
+            <span>2. РўРµРјР° Р· РѕР±СЂР°РЅРѕС— РѕР±Р»Р°СЃС‚С–</span>
+          </label>
+          <select
+            value={selectedTopicId}
+            disabled={selectedDomainId === '' || loadingTopics}
+            onChange={(e) => {
+              setFormError('');
+              setSelectedTopicId(e.target.value === '' ? '' : Number(e.target.value));
+            }}
+            className="w-full px-4 py-3 rounded-xl bg-app border border-line text-main text-sm sm:text-base focus:border-accent outline-none transition disabled:opacity-50"
+          >
+            <option value="">
+              {selectedDomainId === ''
+                ? 'РЎРїРѕС‡Р°С‚РєСѓ РѕР±РµСЂС–С‚СЊ РѕР±Р»Р°СЃС‚СЊ РѕРїРёС‚СѓРІР°РЅРЅСЏ'
+                : loadingTopics
+                ? 'Р—Р°РІР°РЅС‚Р°Р¶РµРЅРЅСЏ С‚РµРј...'
+                : topics.length === 0
+                ? 'РўРµРј Сѓ С†С–Р№ РѕР±Р»Р°СЃС‚С– РЅРµ Р·РЅР°Р№РґРµРЅРѕ'
+                : 'вЂ” РћР±РµСЂС–С‚СЊ С‚РµРјСѓ вЂ”'}
+            </option>
+            {topics.map((t) => (
+              <option key={t.topicId} value={t.topicId}>
+                {t.topicName}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        {/* 3. РџРѕРІР·СѓРЅРѕРє РЅР° 4 СЃРµРєС†С–С—: 5/5, 6/4, 7/3, 8/2 */}
+        <div className="space-y-4 pt-2 border-t border-line">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
+            <label className="flex items-center gap-2 text-sm font-semibold text-main">
+              <Sliders className="w-4 h-4 text-accent" />
+              <span>3. РЎРїС–РІРІС–РґРЅРѕС€РµРЅРЅСЏ РїРёС‚Р°РЅСЊ (РћР±СЂР°РЅР° С‚РµРјР° / Р Р°РЅРґРѕРјРЅС–)</span>
+            </label>
+            <span className="text-sm font-bold text-highlight">{currentSection.label}</span>
+          </div>
+
+          {/* Р’С–Р·СѓР°Р»СЊРЅР° С€РєР°Р»Р° СЂРѕР·РїРѕРґС–Р»Сѓ 10 РїРёС‚Р°РЅСЊ */}
+          <div className="space-y-2">
+            <div className="h-3 w-full rounded-full bg-app border border-line overflow-hidden flex">
+              <div
+                className="bg-accent transition-all duration-200"
+                style={{ width: `${preferredCount * 10}%` }}
+              />
+              <div
+                className="bg-highlight/80 transition-all duration-200"
+                style={{ width: `${(10 - preferredCount) * 10}%` }}
+              />
+            </div>
+
+            <div className="flex justify-between text-xs text-muted">
+              <span>
+                РћР±СЂР°РЅР° С‚РµРјР°: <strong className="text-main">{preferredCount} РїРёС‚Р°РЅСЊ</strong>
+              </span>
+              <span className="inline-flex items-center gap-1">
+                <Shuffle className="w-3.5 h-3.5 text-highlight" />
+                Р Р°РЅРґРѕРјРЅС– Р· СЂС–Р·РЅРёС… С‚РµРј: <strong className="text-main">{10 - preferredCount} РїРёС‚Р°РЅСЊ</strong>
+              </span>
+            </div>
+          </div>
+
+          {/* Р†РЅС‚РµСЂР°РєС‚РёРІРЅРёР№ range-РїРѕРІР·СѓРЅРѕРє */}
+          <div className="px-1 pt-1">
+            <input
+              type="range"
+              min={5}
+              max={8}
+              step={1}
+              value={preferredCount}
+              onChange={(e) => setPreferredCount(Number(e.target.value) as PreferredTopicCount)}
+              className="w-full accent-(--accent) cursor-pointer h-2 rounded-lg bg-app"
+            />
+          </div>
+
+          {/* 4 РєР»С–РєР°Р±РµР»СЊРЅС– СЃРµРєС†С–С— РґР»СЏ Р·СЂСѓС‡РЅРѕРіРѕ РІРёР±РѕСЂСѓ РЅР° РјРѕР±С–Р»СЊРЅРёС… С– РґРµСЃРєС‚РѕРїС– */}
+          <div className="grid grid-cols-4 gap-2 sm:gap-3">
+            {SLIDER_SECTIONS.map((sec) => {
+              const active = preferredCount === sec.preferred;
+              return (
+                <button
+                  key={sec.preferred}
+                  type="button"
+                  onClick={() => setPreferredCount(sec.preferred)}
+                  className={`py-2.5 px-2 rounded-xl border text-center transition cursor-pointer ${
+                    active
+                      ? 'bg-accent border-accent text-accent-text font-bold shadow-sm'
+                      : 'bg-app border-line text-muted hover:text-main hover:border-accent/50 font-medium'
+                  }`}
+                >
+                  <div className="text-sm sm:text-base">{sec.label}</div>
+                  <div className="text-[10px] sm:text-xs opacity-80">
+                    {sec.preferred} С‚РµРј. / {sec.random} РІРёРї.
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+
+          <p className="text-xs text-muted text-center">{currentSection.hint}</p>
+        </div>
+
+        {formError && (
+          <div className="p-3 rounded-xl bg-rose-950/60 border border-rose-800 text-rose-300 text-xs sm:text-sm">
+            {formError}
+          </div>
+        )}
+
+        {/* РљРЅРѕРїРєР° "РџРѕС‡Р°С‚Рё РѕРїРёС‚СѓРІР°РЅРЅСЏ" */}
+        <button
+          type="button"
+          onClick={handleStartSurvey}
+          className="w-full py-3.5 px-6 rounded-xl bg-accent hover:bg-accent-hover text-accent-text font-semibold text-base inline-flex items-center justify-center gap-2.5 transition shadow-sm cursor-pointer"
+        >
+          <Play className="w-5 h-5" />
+          <span>РџРѕС‡Р°С‚Рё РѕРїРёС‚СѓРІР°РЅРЅСЏ</span>
+        </button>
+      </div>
+    </div>
+  );
+}
+
+==================== F:\University\MySurveyApp\frontend\src\pages\TakeSurveyPage.tsx ====================
+export function TakeSurveyPage() { return <div className='bg-card border border-line rounded-2xl p-6 text-main'>Сторінка TakeSurveyPage у розробці</div>; }
+
+
+==================== F:\University\MySurveyApp\frontend\src\types\survey.ts ====================
+export type SurveyType = 'SingleChoice' | 'MultipleChoice' | 'Numeric';
+export type SurveyStatus = 'Active' | 'Inactive' | 'Pending';
+
+export interface SurveyOption {
+  optionId: number;
+  optionText: string;
+  orderIndex: number;
+}
+
+export interface Survey {
+  surveyId: number;
+  questionText: string;
+  surveyType: SurveyType;
+  status: SurveyStatus;
+  domainName: string;
+  topicName: string;
+  regionName: string | null;
+  createdAt: string;
+  options: SurveyOption[];
+}
+
+export interface UserProfile {
+  userId: string;
+  email: string;
+  userType: 'Anonymous' | 'User' | 'Moderator';
+  answersCount: number;
+  gender: string | null;
+  birthYear: number | null;
+  regionName: string | null;
+  occDomainName: string | null;
+  occupationName: string | null;
+  hobbyName: string | null;
+}
+
+export interface OptionStat {
+  label: string;
+  count: number;
+  percentage: number;
+}
+
+export interface SurveyDiagramData {
+  surveyId: number;
+  questionText: string;
+  surveyType: SurveyType;
+  totalResponses: number;
+  averageAnsweredMs: number;
+  stats: OptionStat[];
+}
+
+export interface SurveyDomain {
+  domainId: number;
+  domainName: string;
+}
+
+export interface SurveyTopic {
+  topicId: number;
+  domainId: number;
+  topicName: string;
+}
+
+export type PreferredTopicCount = 5 | 6 | 7 | 8;
+
+export interface SavedSurveyFilters {
+  domainId: number;
+  domainName: string;
+  topicId: number;
+  topicName: string;
+  preferredCount: PreferredTopicCount; // РЎРєС–Р»СЊРєРё РїРёС‚Р°РЅСЊ Р· РѕР±СЂР°РЅРѕС— С‚РµРјРё (5..8)
+  randomCount: number;                 // РЎРєС–Р»СЊРєРё СЂР°РЅРґРѕРјРЅРёС… РїРёС‚Р°РЅСЊ (5..2)
+  updatedAt: string;
+}
+
+==================== F:\University\MySurveyApp\frontend\src\App.css ====================
+.counter {
+  font-size: 16px;
+  padding: 5px 10px;
+  border-radius: 5px;
+  color: var(--accent);
+  background: var(--accent-bg);
+  border: 2px solid transparent;
+  transition: border-color 0.3s;
+  margin-bottom: 24px;
+
+  &:hover {
+    border-color: var(--accent-border);
+  }
+  &:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+}
+
+.hero {
+  position: relative;
+
+  .base,
+  .framework,
+  .vite {
+    inset-inline: 0;
+    margin: 0 auto;
+  }
+
+  .base {
+    width: 170px;
+    position: relative;
+    z-index: 0;
+  }
+
+  .framework,
+  .vite {
+    position: absolute;
+  }
+
+  .framework {
+    z-index: 1;
+    top: 34px;
+    height: 28px;
+    transform: perspective(2000px) rotateZ(300deg) rotateX(44deg) rotateY(39deg)
+      scale(1.4);
+  }
+
+  .vite {
+    z-index: 0;
+    top: 107px;
+    height: 26px;
+    width: auto;
+    transform: perspective(2000px) rotateZ(300deg) rotateX(40deg) rotateY(39deg)
+      scale(0.8);
+  }
+}
+
+#center {
+  display: flex;
+  flex-direction: column;
+  gap: 25px;
+  place-content: center;
+  place-items: center;
+  flex-grow: 1;
+
+  @media (max-width: 1024px) {
+    padding: 32px 20px 24px;
+    gap: 18px;
+  }
+}
+
+#next-steps {
+  display: flex;
+  border-top: 1px solid var(--border);
+  text-align: left;
+
+  & > div {
+    flex: 1 1 0;
+    padding: 32px;
+    @media (max-width: 1024px) {
+      padding: 24px 20px;
+    }
+  }
+
+  .icon {
+    margin-bottom: 16px;
+    width: 22px;
+    height: 22px;
+  }
+
+  @media (max-width: 1024px) {
+    flex-direction: column;
+    text-align: center;
+  }
+}
+
+#docs {
+  border-right: 1px solid var(--border);
+
+  @media (max-width: 1024px) {
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+  }
+}
+
+#next-steps ul {
+  list-style: none;
+  padding: 0;
+  display: flex;
+  gap: 8px;
+  margin: 32px 0 0;
+
+  .logo {
+    height: 18px;
+  }
+
+  a {
+    color: var(--text-h);
+    font-size: 16px;
+    border-radius: 6px;
+    background: var(--social-bg);
+    display: flex;
+    padding: 6px 12px;
+    align-items: center;
+    gap: 8px;
+    text-decoration: none;
+    transition: box-shadow 0.3s;
+
+    &:hover {
+      box-shadow: var(--shadow);
+    }
+    .button-icon {
+      height: 18px;
+      width: 18px;
+    }
+  }
+
+  @media (max-width: 1024px) {
+    margin-top: 20px;
+    flex-wrap: wrap;
+    justify-content: center;
+
+    li {
+      flex: 1 1 calc(50% - 8px);
+    }
+
+    a {
+      width: 100%;
+      justify-content: center;
+      box-sizing: border-box;
+    }
+  }
+}
+
+#spacer {
+  height: 88px;
+  border-top: 1px solid var(--border);
+  @media (max-width: 1024px) {
+    height: 48px;
+  }
+}
+
+.ticks {
+  position: relative;
+  width: 100%;
+
+  &::before,
+  &::after {
+    content: '';
+    position: absolute;
+    top: -4.5px;
+    border: 5px solid transparent;
+  }
+
+  &::before {
+    left: 0;
+    border-left-color: var(--border);
+  }
+  &::after {
+    right: 0;
+    border-right-color: var(--border);
+  }
+}
+
+
+==================== F:\University\MySurveyApp\frontend\src\App.tsx ====================
+import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { Navbar } from './components/Navbar';
+import { HomePage } from './pages/HomePage';
+import { AuthPage } from './pages/AuthPage';
+import { ProfilePage } from './pages/ProfilePage';
+import { CreateSurveyPage } from './pages/CreateSurveyPage';
+import { MySurveyDetailsPage } from './pages/MySurveyDetailsPage';
+import { SurveysFilterPage } from './pages/SurveysFilterPage';
+import { TakeSurveyPage } from './pages/TakeSurveyPage';
+import { SurveyAnalysisPage } from './pages/SurveyAnalysisPage';
+
+export default function App() {
+  return (
+    <BrowserRouter>
+      <div className="min-h-screen bg-app text-main flex flex-col">
+        <Navbar />
+        <main className="flex-1 max-w-6xl w-full mx-auto px-4 pt-6 pb-24 md:py-10">
+          <Routes>
+            <Route path="/" element={<HomePage />} />
+            <Route path="/auth" element={<AuthPage />} />
+            <Route path="/profile" element={<ProfilePage />} />
+            <Route path="/my-surveys/new" element={<CreateSurveyPage />} />
+            <Route path="/my-surveys/:id" element={<MySurveyDetailsPage />} />
+            <Route path="/surveys" element={<SurveysFilterPage />} />
+            <Route path="/survey/play" element={<TakeSurveyPage />} />
+            <Route path="/survey/:id" element={<TakeSurveyPage />} />
+            <Route path="/surveys/:id/analysis" element={<SurveyAnalysisPage />} />
+          </Routes>
+        </main>
+      </div>
+    </BrowserRouter>
+  );
+}
+
+==================== F:\University\MySurveyApp\frontend\src\index.css ====================
+@import "tailwindcss";
+
+@theme inline {
+  --color-app: var(--bg-app);
+  --color-card: var(--bg-card);
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-text: var(--accent-text);
+  --color-highlight: var(--highlight);
+  --color-main: var(--text-main);
+  --color-muted: var(--text-muted);
+  --color-line: var(--border-line);
+}
+
+/* 1. РўРµРјР° Р·Р° Р·Р°РјРѕРІС‡СѓРІР°РЅРЅСЏРј: Р“Р»РёР±РѕРєРёР№ РѕРєРµР°РЅ */
+:root,
+[data-theme="ocean"] {
+  --bg-app: #0b1120;
+  --bg-card: #131c31;
+  --accent: #2563eb;
+  --accent-hover: #3b82f6;
+  --accent-text: #ffffff;
+  --highlight: #10b981;
+  --text-main: #f1f5f9;
+  --text-muted: #94a3b8;
+  --border-line: #1e293b;
+}
+
+/* 2. РўРµРјР°: Р•РЅРµСЂРіС–СЏ Р±Р»С–С†Сѓ */
+[data-theme="blitz"] {
+  --bg-app: #121118;
+  --bg-card: #1c1a24;
+  --accent: #e91e63;
+  --accent-hover: #f43f5e;
+  --accent-text: #ffffff;
+  --highlight: #ffde17;
+  --text-main: #fafafa;
+  --text-muted: #a1a1aa;
+  --border-line: #2e2b3b;
+}
+
+/* 3. РўРµРјР°: РЎРєР°РЅРґРёРЅР°РІСЃСЊРєРёР№ РґРµРЅСЊ */
+[data-theme="daylight"] {
+  --bg-app: #f8fafc;
+  --bg-card: #ffffff;
+  --accent: #1e3a8a;
+  --accent-hover: #1d4ed8;
+  --accent-text: #ffffff;
+  --highlight: #059669;
+  --text-main: #0f172a;
+  --text-muted: #475569;
+  --border-line: #e2e8f0;
+}
+
+body {
+  background-color: var(--bg-app);
+  color: var(--text-main);
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+==================== F:\University\MySurveyApp\frontend\src\main.tsx ====================
+import { StrictMode } from 'react'
+import { createRoot } from 'react-dom/client'
+import './index.css'
+import App from './App.tsx'
+
+createRoot(document.getElementById('root')!).render(
+  <StrictMode>
+    <App />
+  </StrictMode>,
+)
+
+
+==================== F:\University\MySurveyApp\frontend\.oxlintrc.json ====================
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["react", "typescript", "oxc"],
+  "rules": {
+    "react/rules-of-hooks": "error",
+    "react/only-export-components": ["warn", { "allowConstantExport": true }]
+  }
+}
+
+
+==================== F:\University\MySurveyApp\frontend\index.html ====================
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>frontend</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+
+
+==================== F:\University\MySurveyApp\frontend\package.json ====================
+{
+  "name": "frontend",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "lint": "oxlint",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@tailwindcss/vite": "^4.3.5",
+    "axios": "^1.21.1",
+    "lucide-react": "^1.72.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "react-router-dom": "^7.18.5",
+    "recharts": "^3.10.1",
+    "tailwindcss": "^4.3.5"
+  },
+  "devDependencies": {
+    "@types/node": "^24.19.2",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.2",
+    "oxlint": "^1.90.0",
+    "typescript": "~7.0.2",
+    "vite": "^8.3.6"
+  }
+}
+
+
+==================== F:\University\MySurveyApp\frontend\vite.config.ts ====================
+import { defineConfig } from 'vite'
+import react from '@vitejs/plugin-react'
+import tailwindcss from '@tailwindcss/vite'
+
+export default defineConfig({
+  plugins: [react(), tailwindcss()],
+  server: {
+    proxy: {
+      '/api': {
+        target: 'http://localhost:5000',
+        changeOrigin: true,
+      },
+    },
+  },
+})

@@ -26,8 +26,9 @@ namespace MySurveyApp.SqlService.Controllers
         /// Створити нове опитування (Тільки для авторизованих користувачів з JWT).
         /// </summary>
         [HttpPost]
-        [Authorize] // Захист ендпоінта на рівні JWT-схеми
+        [Authorize]
         [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
         [ProducesResponseType(StatusCodes.Status401Unauthorized)]
         [ProducesResponseType(StatusCodes.Status403Forbidden)]
         [ProducesResponseType(StatusCodes.Status500InternalServerError)]
@@ -42,25 +43,59 @@ namespace MySurveyApp.SqlService.Controllers
                 return Unauthorized(new { message = "Створювати опитування можуть тільки зареєстровані та авторизовані користувачі." });
             }
 
-            // 2. Формування сутності опитування
+            // 2. Валідація тривалості опитування (від 1 дня до 1 року)
+            if (dto.DurationDays < 1 || dto.DurationDays > 365)
+            {
+                return BadRequest(new { message = "Тривалість опитування має бути від 1 до 365 днів (не більше року)." });
+            }
+
+            // 3. Безпечний парсинг типу опитування
+            if (!Enum.TryParse<SurveyType>(dto.SurveyType, true, out var parsedSurveyType) ||
+                !Enum.IsDefined(typeof(SurveyType), parsedSurveyType))
+            {
+                return BadRequest(new { message = $"Невідомий тип опитування: '{dto.SurveyType}'." });
+            }
+
+            // 4. Підготовка варіантів відповідей залежно від типу опитування
+            var surveyOptions = new List<SurveyOption>();
+
+            if (parsedSurveyType != SurveyType.RatingScale)
+            {
+                var validOptions = (dto.Options ?? new List<CreateSurveyOptionDto>())
+                    .Where(o => !string.IsNullOrWhiteSpace(o.OptionText))
+                    .ToList();
+
+                if (validOptions.Count < 2)
+                {
+                    return BadRequest(new { message = "Для опитування з вибором варіантів потрібно вказати щонайменше 2 відповіді." });
+                }
+
+                surveyOptions = validOptions
+                    .Select((o, idx) => new SurveyOption
+                    {
+                        OptionText = o.OptionText.Trim(),
+                        OrderIndex = o.OrderIndex >= 0 ? o.OrderIndex : idx
+                    })
+                    .ToList();
+            }
+
+            // 5. Формування сутності опитування з розрахунком дати завершення в UTC
+            var nowUtc = DateTime.UtcNow;
+
             var newSurvey = new Survey
             {
                 AuthorId = authorId,
-                SurveyText = dto.SurveyText,
-                SurveyType = Enum.Parse<SurveyType>(dto.SurveyType, true),
+                SurveyText = dto.SurveyText.Trim(),
+                SurveyType = parsedSurveyType,
                 TopicId = dto.TopicId,
-                RegionTargetId = dto.RegionTargetId,
+                RegionTargetId = dto.RegionTargetId is > 0 ? dto.RegionTargetId : null,
                 Status = SurveyStatus.Pending,
-                CreatedAt = DateTime.UtcNow,
-                ExpiresAt = dto.ExpiresAt.ToUniversalTime(),
-                SurveyOptions = dto.Options.Select(o => new SurveyOption
-                {
-                    OptionText = o.OptionText,
-                    OrderIndex = o.OrderIndex
-                }).ToList()
+                CreatedAt = nowUtc,
+                ExpiresAt = nowUtc.AddDays(dto.DurationDays),
+                SurveyOptions = surveyOptions
             };
 
-            // 3. Збереження в базі даних та перехоплення тригера токенів
+            // 6. Збереження в базі даних та перехоплення тригера токенів
             try
             {
                 _context.Surveys.Add(newSurvey);
@@ -69,12 +104,12 @@ namespace MySurveyApp.SqlService.Controllers
                 return Ok(new
                 {
                     message = "Опитування успішно створено!",
-                    surveyId = newSurvey.SurveyId
+                    surveyId = newSurvey.SurveyId,
+                    expiresAt = newSurvey.ExpiresAt
                 });
             }
             catch (DbUpdateException ex) when (ex.InnerException is PostgresException pgEx && pgEx.SqlState == "P0001")
             {
-                // Недостатньо токенів для створення опитування
                 return StatusCode(StatusCodes.Status403Forbidden, new { message = pgEx.MessageText });
             }
             catch (Exception ex)
@@ -151,11 +186,13 @@ namespace MySurveyApp.SqlService.Controllers
 
             if (!string.IsNullOrWhiteSpace(dto.Status))
             {
-                if (Enum.TryParse<SurveyStatus>(dto.Status, true, out var newStatus))
+                if (!Enum.TryParse<SurveyStatus>(dto.Status, true, out var parsedStatus) ||
+                    !Enum.IsDefined(typeof(SurveyStatus), parsedStatus))
                 {
-                    survey.Status = newStatus;
-                    isUpdated = true;
+                    return BadRequest(new { message = $"Невідомий статус опитування: '{dto.Status}'." });
                 }
+
+                survey.Status = parsedStatus;
             }
 
             // 4. Оновлення варіантів відповідей (якщо вони передані)
@@ -193,13 +230,19 @@ namespace MySurveyApp.SqlService.Controllers
         }
 
         /// <summary>
-        /// Отримати випадкове активне опитування за темою та регіоном, 
+        /// Отримати випадкове активне опитування за темою та регіоном,
         /// на яке користувач ще НЕ відповідав.
         /// </summary>
         [HttpGet("random")]
-        public async Task<IActionResult> GetRandomSurvey([FromQuery] int topicId, [FromQuery] int? regionId)
+        [ProducesResponseType(typeof(RandomSurveyDto), StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
+        public async Task<ActionResult<RandomSurveyDto>> GetRandomSurvey(
+            [FromQuery] int? topicId,
+            [FromQuery] int? excludeTopicId,
+            [FromQuery] int? regionId)
         {
-            // 1. Ідентифікація користувача
+            var anonTokenHeader = Request.Headers["X-Anonymous-Token"].FirstOrDefault();
             var deviceKeyHeader = Request.Headers["X-Device-Key"].FirstOrDefault();
             var currentUserIdClaim = User.FindFirstValue(ClaimTypes.NameIdentifier) ?? User.FindFirstValue("sub");
 
@@ -207,6 +250,10 @@ namespace MySurveyApp.SqlService.Controllers
             if (!string.IsNullOrEmpty(currentUserIdClaim) && Guid.TryParse(currentUserIdClaim, out Guid authId))
             {
                 userId = authId;
+            }
+            else if (!string.IsNullOrWhiteSpace(anonTokenHeader) && Guid.TryParse(anonTokenHeader, out Guid anonId))
+            {
+                userId = anonId;
             }
             else if (!string.IsNullOrWhiteSpace(deviceKeyHeader))
             {
@@ -217,31 +264,33 @@ namespace MySurveyApp.SqlService.Controllers
                 return Unauthorized(new { message = "Необхідно передати JWT токен або заголовок X-Device-Key." });
             }
 
-            // 2. Побудова базового запиту: тільки активні та не прострочені
             var query = _context.Surveys
-                .Include(s => s.SurveyOptions) // Обов'язково підтягуємо варіанти відповідей
+                .AsNoTracking()
+                .Include(s => s.SurveyOptions)
                 .Where(s => s.Status == SurveyStatus.Active
-                         && s.ExpiresAt > DateTime.UtcNow
-                         && s.TopicId == topicId);
+                         && s.ExpiresAt > DateTime.UtcNow);
 
-            // 3. Фільтрація за регіоном
-            // Якщо передано регіон, шукаємо опитування для цього регіону АБО загальнонаціональні (RegionTargetId == null)
+            if (topicId.HasValue && topicId.Value > 0)
+            {
+                query = query.Where(s => s.TopicId == topicId.Value);
+            }
+            else if (excludeTopicId.HasValue && excludeTopicId.Value > 0)
+            {
+                query = query.Where(s => s.TopicId != excludeTopicId.Value);
+            }
+
             if (regionId.HasValue)
             {
                 query = query.Where(s => s.RegionTargetId == regionId.Value || s.RegionTargetId == null);
             }
             else
             {
-                // Якщо юзер не має регіону, показуємо тільки загальнонаціональні
                 query = query.Where(s => s.RegionTargetId == null);
             }
 
-            // 4. ВІДСІЮВАННЯ ТИХ, НА ЯКІ ВЖЕ ВІДПОВІВ
-            // EF Core перетворить це на ефективний SQL-оператор NOT EXISTS (...)
             query = query.Where(s => !_context.Set<SurveyInteraction>()
                 .Any(si => si.SurveyId == s.SurveyId && si.UserId == userId));
 
-            // 5. Вибір ВИПАДКОВОГО опитування з тих, що залишились
             var randomSurvey = await query
                 .OrderBy(s => EF.Functions.Random())
                 .FirstOrDefaultAsync();
@@ -251,22 +300,16 @@ namespace MySurveyApp.SqlService.Controllers
                 return NotFound(new { message = "Немає нових доступних опитувань для вибраної теми та регіону." });
             }
 
-            // 6. Формування зручної відповіді для клієнта
-            var result = new
-            {
-                surveyId = randomSurvey.SurveyId,
-                surveyText = randomSurvey.SurveyText,
-                surveyType = randomSurvey.SurveyType.ToString(),
-                topicId = randomSurvey.TopicId,
-                // Сортуємо опції так, як їх задав автор
-                options = randomSurvey.SurveyOptions.OrderBy(o => o.OrderIndex).Select(o => new
-                {
-                    optionId = o.OptionId,
-                    optionText = o.OptionText
-                })
-            };
-
-            return Ok(result);
+            return Ok(new RandomSurveyDto(
+                SurveyId: randomSurvey.SurveyId,
+                SurveyText: randomSurvey.SurveyText,
+                SurveyType: randomSurvey.SurveyType.ToString(),
+                TopicId: randomSurvey.TopicId,
+                Options: randomSurvey.SurveyOptions
+                    .OrderBy(o => o.OrderIndex)
+                    .Select(o => new SurveyOptionDto(o.OptionId, o.OptionText))
+                    .ToList()
+            ));
         }
 
         /// <summary>

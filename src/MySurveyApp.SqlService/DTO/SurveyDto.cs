@@ -1,20 +1,30 @@
 ﻿namespace MySurveyApp.SqlService.DTO
 {
+    using System.ComponentModel.DataAnnotations;
+
     public class CreateSurveyDto
     {
-        public string SurveyText { get; set; }
-        public string SurveyType { get; set; } // Наприклад: "SingleChoice", "MultipleChoice"
-        public int TopicId { get; set; }
-        public int? RegionTargetId { get; set; }
-        public DateTime ExpiresAt { get; set; }
+        [Required(ErrorMessage = "Текст опитування є обов'язковим.")]
+        [StringLength(300, MinimumLength = 5, ErrorMessage = "Текст опитування має містити від 5 до 300 символів.")]
+        public string SurveyText { get; set; } = string.Empty;
 
-        // Список варіантів відповідей, які юзер створює разом з опитуванням
-        public List<CreateSurveyOptionDto> Options { get; set; } = new();
+        [Required(ErrorMessage = "Тип опитування є обов'язковим.")]
+        public string SurveyType { get; set; } = string.Empty;
+
+        [Range(1, int.MaxValue, ErrorMessage = "Оберіть коректну тему опитування.")]
+        public int TopicId { get; set; }
+
+        public int? RegionTargetId { get; set; }
+
+        [Range(1, 365, ErrorMessage = "Тривалість опитування має становити від 1 до 365 днів (не більше року).")]
+        public int DurationDays { get; set; } = 7;
+
+        public List<CreateSurveyOptionDto>? Options { get; set; }
     }
 
     public class CreateSurveyOptionDto
     {
-        public string OptionText { get; set; }
+        public string OptionText { get; set; } = string.Empty;
         public int OrderIndex { get; set; }
     }
 
@@ -36,4 +46,13 @@
         public int SurveyId { get; set; }
         public Guid UserId { get; set; }
     }
+    public record SurveyOptionDto(int OptionId, string OptionText);
+
+    public record RandomSurveyDto(
+    int SurveyId,
+    string SurveyText,
+    string SurveyType,
+    int TopicId,
+    List<SurveyOptionDto> Options
+);
 }

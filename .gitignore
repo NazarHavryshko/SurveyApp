@@ -88,3 +88,37 @@ $RECYCLE.BIN/
 ._*
 .Spotlight-V100
 .Trashes
+
+# Залежності (Dependencies)
+node_modules/
+.pnp
+.pnp.js
+
+# Збірка фронтенду (Vite / Production build)
+dist/
+dist-ssr/
+*.local
+
+# Кеш Vite та TypeScript
+.vite/
+*.tsbuildinfo
+
+# Змінні середовища (URL бекенду, ключі)
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Логи пакетних менеджерів
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Системні файли та IDE
+.DS_Store
+Thumbs.db
+.vscode/*
+!.vscode/extensions.json
+.idea/

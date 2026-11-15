@@ -99,7 +99,7 @@ public class DictionariesController : ControllerBase
     {
         var occupations = await _context.Occupations
             .AsNoTracking()
-            .Where(o => o.OccupationId == domainId)
+            .Where(o => o.DomainId == domainId)
             .OrderBy(o => o.OccupationName)
             .ToListAsync();
 

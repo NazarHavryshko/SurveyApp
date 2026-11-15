@@ -1,0 +1,59 @@
+@import "tailwindcss";
+
+@theme inline {
+  --color-app: var(--bg-app);
+  --color-card: var(--bg-card);
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-text: var(--accent-text);
+  --color-highlight: var(--highlight);
+  --color-main: var(--text-main);
+  --color-muted: var(--text-muted);
+  --color-line: var(--border-line);
+}
+
+/* 1. Тема за замовчуванням: Глибокий океан */
+:root,
+[data-theme="ocean"] {
+  --bg-app: #0b1120;
+  --bg-card: #131c31;
+  --accent: #2563eb;
+  --accent-hover: #3b82f6;
+  --accent-text: #ffffff;
+  --highlight: #10b981;
+  --text-main: #f1f5f9;
+  --text-muted: #94a3b8;
+  --border-line: #1e293b;
+}
+
+/* 2. Тема: Енергія бліцу */
+[data-theme="blitz"] {
+  --bg-app: #121118;
+  --bg-card: #1c1a24;
+  --accent: #e91e63;
+  --accent-hover: #f43f5e;
+  --accent-text: #ffffff;
+  --highlight: #ffde17;
+  --text-main: #fafafa;
+  --text-muted: #a1a1aa;
+  --border-line: #2e2b3b;
+}
+
+/* 3. Тема: Скандинавський день */
+[data-theme="daylight"] {
+  --bg-app: #f8fafc;
+  --bg-card: #ffffff;
+  --accent: #1e3a8a;
+  --accent-hover: #1d4ed8;
+  --accent-text: #ffffff;
+  --highlight: #059669;
+  --text-main: #0f172a;
+  --text-muted: #475569;
+  --border-line: #e2e8f0;
+}
+
+body {
+  background-color: var(--bg-app);
+  color: var(--text-main);
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
