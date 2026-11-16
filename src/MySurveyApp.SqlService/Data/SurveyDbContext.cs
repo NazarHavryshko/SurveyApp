@@ -17,6 +17,7 @@ public class SurveyDbContext : DbContext
     public DbSet<OccupationDomain> OccupationDomains => Set<OccupationDomain>();
     public DbSet<SurveyTopic> SurveyTopics => Set<SurveyTopic>();
     public DbSet<SurveyDomain> SurveyDomains => Set<SurveyDomain>();
+    public DbSet<SurveyBookmark> SurveyBookmarks => Set<SurveyBookmark>();
 
     protected override void ConfigureConventions(ModelConfigurationBuilder configurationBuilder)
     {

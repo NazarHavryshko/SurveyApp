@@ -1759,6 +1759,10 @@ namespace MySurveyApp.SqlService.Migrations
                         .HasColumnType("integer")
                         .HasColumnName("region_target_id");
 
+                    b.Property<string>("RejectionReason")
+                        .HasColumnType("text")
+                        .HasColumnName("rejection_reason");
+
                     b.Property<string>("Status")
                         .IsRequired()
                         .HasColumnType("text")
@@ -1794,6 +1798,23 @@ namespace MySurveyApp.SqlService.Migrations
                         .HasFilter("status = 'Active'");
 
                     b.ToTable("survey");
+                });
+
+            modelBuilder.Entity("MySurveyApp.SqlService.Models.SurveyBookmark", b =>
+                {
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("user_id");
+
+                    b.Property<int>("SurveyId")
+                        .HasColumnType("integer")
+                        .HasColumnName("survey_id");
+
+                    b.HasKey("UserId", "SurveyId");
+
+                    b.HasIndex("SurveyId");
+
+                    b.ToTable("survey_bookmarks");
                 });
 
             modelBuilder.Entity("MySurveyApp.SqlService.Models.SurveyDomain", b =>
@@ -2283,6 +2304,10 @@ namespace MySurveyApp.SqlService.Migrations
                         .HasColumnType("integer")
                         .HasColumnName("hobby_id");
 
+                    b.Property<DateTime>("LastActiveAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("last_active_at");
+
                     b.Property<string>("Nickname")
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)")
@@ -2357,6 +2382,25 @@ namespace MySurveyApp.SqlService.Migrations
                     b.Navigation("Region");
 
                     b.Navigation("SurveyTopic");
+                });
+
+            modelBuilder.Entity("MySurveyApp.SqlService.Models.SurveyBookmark", b =>
+                {
+                    b.HasOne("MySurveyApp.SqlService.Models.Survey", "Survey")
+                        .WithMany()
+                        .HasForeignKey("SurveyId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("MySurveyApp.SqlService.Models.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Survey");
+
+                    b.Navigation("User");
                 });
 
             modelBuilder.Entity("MySurveyApp.SqlService.Models.SurveyInteraction", b =>

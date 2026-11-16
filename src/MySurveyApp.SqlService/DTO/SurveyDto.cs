@@ -36,6 +36,7 @@
         public int? RegionTargetId { get; set; }
         public DateTime? ExpiresAt { get; set; }
         public string? Status { get; set; }
+        public string? RejectionReason { get; set; }
 
         // Використовуємо той самий клас DTO, що й при створенні
         public List<CreateSurveyOptionDto>? Options { get; set; }

@@ -4,6 +4,7 @@ import {
   SlidersHorizontal,
   User,
   FolderKanban,
+  Bookmark,
   LogIn,
   UserPlus,
   ArrowRight,
@@ -157,8 +158,8 @@ export function HomePage() {
 
       {/* Секція дій залежно від перевірки авторизації */}
       {authStatus === 'checking' ? (
-        <section className="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-6">
-          {[1, 2, 3].map((i) => (
+        <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6">
+          {[1, 2, 3, 4].map((i) => (
             <div
               key={i}
               className="h-44 rounded-2xl bg-card border border-line animate-pulse"
@@ -167,7 +168,7 @@ export function HomePage() {
         </section>
       ) : authStatus === 'authenticated' ? (
         /* Варіант 1: Користувач АВТОРИЗОВАНИЙ */
-        <section className="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-6">
+        <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6">
           {/* Картка 1: Для модератора/адміністратора — Модерація опитувань, для звичайного користувача — Пройти опитування */}
           {canModerate ? (
             <div className="bg-card border border-line rounded-2xl p-5 sm:p-6 flex flex-col justify-between gap-5">
@@ -248,6 +249,27 @@ export function HomePage() {
               className="w-full inline-flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-app hover:border-accent border border-line text-main text-sm font-semibold transition"
             >
               <span>Мої опитування</span>
+              <ArrowRight className="w-4 h-4" />
+            </Link>
+          </div>
+
+          {/* Картка 4: Відстежувані опитування */}
+          <div className="bg-card border border-line rounded-2xl p-5 sm:p-6 flex flex-col justify-between gap-5">
+            <div className="space-y-2">
+              <div className="w-10 h-10 rounded-xl bg-app border border-line flex items-center justify-center text-highlight">
+                <Bookmark className="w-5 h-5" />
+              </div>
+              <h2 className="text-lg font-semibold text-main">Відстежувані опитування</h2>
+              <p className="text-sm text-muted">
+                Збережені вами опитування для швидкого перегляду оновленої статистики та
+                коментарів.
+              </p>
+            </div>
+            <Link
+              to="/bookmarks"
+              className="w-full inline-flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-app hover:border-accent border border-line text-main text-sm font-semibold transition"
+            >
+              <span>Відстежувані</span>
               <ArrowRight className="w-4 h-4" />
             </Link>
           </div>

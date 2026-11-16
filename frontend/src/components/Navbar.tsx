@@ -6,6 +6,7 @@ import {
   FolderKanban,
   LogIn,
   Home,
+  Bookmark,
 } from 'lucide-react';
 import { ThemeSwitcher } from './ThemeSwitcher';
 
@@ -53,6 +54,14 @@ export function Navbar() {
                   <FolderKanban className="w-4 h-4" />
                   <span>Мої опитування</span>
                 </Link>
+                <Link
+                to="/bookmarks"
+                className="inline-flex items-center gap-1.5 text-sm font-medium text-muted hover:text-main transition"
+              >
+                <Bookmark className="w-4 h-4" />
+                <span>Відстежувані</span>
+                
+              </Link>
                 <Link
                   to="/profile"
                   className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl font-medium transition ${

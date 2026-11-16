@@ -5,6 +5,7 @@ using MySurveyApp.NoSqlService.DTO;
 using MySurveyApp.NoSqlService.Models;
 using MySurveyApp.NoSqlService.Services;
 using MySurveyApp.Shared.DTO;
+using Microsoft.AspNetCore.RateLimiting;
 
 namespace MySurveyApp.NoSqlService.Controllers;
 
@@ -24,6 +25,7 @@ public class ResponsesController : ControllerBase
     }
 
     [HttpPost]
+    [EnableRateLimiting("ResponsesRateLimit")]
     [ProducesResponseType(StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
@@ -113,4 +115,5 @@ public class ResponsesController : ControllerBase
             responseId = document.Id
         });
     }
+
 }

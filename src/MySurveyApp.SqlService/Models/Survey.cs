@@ -46,6 +46,9 @@ namespace MySurveyApp.SqlService.Models
         [Column("expires_at")]
         public DateTime ExpiresAt { get; set; }
 
+        [Column("rejection_reason")]
+        public string? RejectionReason { get; set; }
+
 
         [ForeignKey(nameof(RegionTargetId))]
         public virtual Region? Region { get; set; }

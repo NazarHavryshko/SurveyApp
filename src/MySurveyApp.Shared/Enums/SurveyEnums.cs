@@ -8,7 +8,8 @@ public enum SurveyStatus
     Pending,
     Active,
     Closed,
-    Archived
+    Archived,
+    Rejected
 }
 
 /// <summary>

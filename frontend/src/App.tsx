@@ -9,6 +9,7 @@ import { SurveysFilterPage } from './pages/SurveysFilterPage';
 import { TakeSurveyPage } from './pages/TakeSurveyPage';
 import { SurveyAnalysisPage } from './pages/SurveyAnalysisPage';
 import { ModerationPage } from './pages/ModerationPage';
+import { BookmarkedSurveysPage } from './pages/BookmarkedSurveysPage';
 
 export default function App() {
   return (
@@ -29,6 +30,7 @@ export default function App() {
             <Route path="/survey/:id" element={<TakeSurveyPage />} />
             <Route path="/surveys/:id/analysis" element={<SurveyAnalysisPage />} />
             <Route path="/moderation" element={<ModerationPage />} />
+            <Route path="/bookmarks" element={<BookmarkedSurveysPage />} />
           </Routes>
         </main>
       </div>

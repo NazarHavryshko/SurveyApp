@@ -1,10 +1,9 @@
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
+using Microsoft.OpenApi;
 using MySurveyApp.SqlService.Data;
 using MySurveyApp.SqlService.Models;
-using Swashbuckle.AspNetCore.SwaggerGen;
-using Swashbuckle.AspNetCore.SwaggerUI;
 using System.Reflection;
 using System.Text;
 
@@ -17,13 +16,11 @@ var connectionString = builder.Configuration.GetConnectionString("Postgres");
 builder.Services.AddDbContext<SurveyDbContext>(options =>
     options.UseNpgsql(connectionString));
 
-// Додаємо підтримку контролерів 
+// Додаємо підтримку контролерів
 builder.Services.AddControllers();
 
-// Реєструємо Swagger / OpenAPI
+// Реєструємо Swagger / OpenAPI (єдиний блок ДО builder.Build())
 builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen();
-
 builder.Services.AddSwaggerGen(options =>
 {
     var xmlFilename = $"{Assembly.GetExecutingAssembly().GetName().Name}.xml";
@@ -32,8 +29,24 @@ builder.Services.AddSwaggerGen(options =>
     {
         options.IncludeXmlComments(xmlPath);
     }
+
+    options.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
+    {
+        Name = "Authorization",
+        Type = SecuritySchemeType.Http,
+        Scheme = "Bearer",
+        BearerFormat = "JWT",
+        In = ParameterLocation.Header,
+        Description = "Введіть JWT токен"
+    });
+
+    options.AddSecurityRequirement(document => new OpenApiSecurityRequirement
+    {
+        [new OpenApiSecuritySchemeReference("Bearer", document)] = []
+    });
 });
 
+// Налаштування JWT-аутентифікації
 builder.Services.AddAuthentication(options =>
 {
     options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
@@ -42,14 +55,13 @@ builder.Services.AddAuthentication(options =>
 })
 .AddJwtBearer(options =>
 {
-    // Замініть цей рядок на ваш секретний ключ (має бути мінімум 32 символи)
     var secretKey = "YOUR_SUPER_SECRET_KEY_FOR_JWT_SURVEY_APP_2026!";
 
     options.TokenValidationParameters = new TokenValidationParameters
     {
-        ValidateIssuer = false, // Для спрощення розробки вимикаємо
-        ValidateAudience = false, // Для спрощення розробки вимикаємо
-        ValidateLifetime = true, // Перевіряти час життя токена (Expires)
+        ValidateIssuer = false,
+        ValidateAudience = false,
+        ValidateLifetime = true,
         ValidateIssuerSigningKey = true,
         IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(secretKey))
     };
@@ -57,17 +69,15 @@ builder.Services.AddAuthentication(options =>
 
 var app = builder.Build();
 
+// Застосування міграцій та тригерів БД при старті
 using (var scope = app.Services.CreateScope())
 {
     var dbContext = scope.ServiceProvider.GetRequiredService<SurveyDbContext>();
-
     dbContext.Database.Migrate();
-
-
     await dbContext.Database.ExecuteSqlRawAsync(Triggers.CreateTriggersSql);
 }
 
-//робимо доступним у Docker
+// Робимо Swagger доступним у Docker
 app.UseSwagger();
 app.UseSwaggerUI(c =>
 {
@@ -75,12 +85,9 @@ app.UseSwaggerUI(c =>
     c.RoutePrefix = string.Empty; // Відкриває UI на кореневому шляху "/"
 });
 
-
-
-// Налаштовуємо маршрутизацію запитів
+// Налаштовуємо маршрутизацію та безпеку запитів
 app.UseRouting();
-
-app.UseAuthentication(); 
+app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapControllers();

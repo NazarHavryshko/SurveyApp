@@ -35,6 +35,7 @@ export interface MySurveyItem {
   isMultipleChoice: boolean;
   topicName?: string | null;
   status: string | number;
+  rejectionReason?: string | null;
   createdAt: string;
   totalVotes: number;
   options: SurveyOptionStat[];
@@ -113,6 +114,11 @@ function formatVotesLabel(count: number): string {
   return `${count} голосів`;
 }
 
+function isSurveyRejected(status: string | number): boolean {
+  const val = String(status).trim().toLowerCase();
+  return val === '4' || val === 'rejected' || val === 'declined';
+}
+
 function normalizeSurveys(rawList: any[]): MySurveyItem[] {
   if (!Array.isArray(rawList)) return [];
 
@@ -133,6 +139,7 @@ function normalizeSurveys(rawList: any[]): MySurveyItem[] {
     }));
 
     const rawType = item.surveyType ?? item.questionType ?? item.type ?? null;
+    const rawReason = item.rejectionReason ?? item.rejection_reason ?? null;
 
     return {
       id: item.surveyId ?? item.questionId ?? item.id ?? index,
@@ -143,6 +150,7 @@ function normalizeSurveys(rawList: any[]): MySurveyItem[] {
       isMultipleChoice: isMultipleChoiceType(rawType),
       topicName: item.topicName ?? item.topic?.topicName ?? item.topic?.name ?? null,
       status: item.status ?? item.moderationStatus ?? 0,
+      rejectionReason: rawReason ? String(rawReason).trim() : null,
       createdAt: String(item.createdAt ?? item.createdDate ?? item.dateCreated ?? ''),
       totalVotes: 0,
       options: mappedOptions,
@@ -259,7 +267,7 @@ function getStatusBadge(status: string | number) {
     };
   }
 
-  if (val === '2' || val === 'rejected' || val === 'declined') {
+  if (isSurveyRejected(val)) {
     return {
       label: 'Відхилено',
       className: 'bg-rose-500/10 border-rose-500/25 text-rose-500',
@@ -267,7 +275,7 @@ function getStatusBadge(status: string | number) {
     };
   }
 
-  if (val === '3' || val === 'closed' || val === 'archived' || val === 'completed') {
+  if (val === '2' || val === '3' || val === 'closed' || val === 'archived' || val === 'completed') {
     return {
       label: 'Завершене',
       className: 'bg-app border-line text-muted',
@@ -541,6 +549,8 @@ export function MySurveysPage() {
             const badge = getStatusBadge(survey.status);
             const isExpanded = Boolean(expandedIds[key]);
             const csvError = csvErrorBySurvey[key];
+            const rejectedWithReason =
+              isSurveyRejected(survey.status) && Boolean(survey.rejectionReason);
 
             return (
               <article
@@ -549,7 +559,7 @@ export function MySurveysPage() {
                   isExpanded ? 'border-accent/50' : 'border-line hover:border-accent/40'
                 }`}
               >
-                {/* Клікабельна шапка: статус, тип та назва опитування */}
+                {/* Клікабельна шапка: статус, тип, назва опитування та причина відхилення */}
                 <button
                   type="button"
                   onClick={() => toggleSurvey(survey.id)}
@@ -584,6 +594,17 @@ export function MySurveysPage() {
                     <h2 className="text-base sm:text-lg font-bold text-main leading-snug">
                       {survey.text}
                     </h2>
+
+                    {/* Причина відхилення модератором (якщо статус Rejected) */}
+                    {rejectedWithReason && (
+                      <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/25 text-rose-500 text-xs sm:text-sm flex items-start gap-2">
+                        <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                        <div className="min-w-0">
+                          <span className="font-semibold">Причина відхилення модератором: </span>
+                          <span className="break-words">{survey.rejectionReason}</span>
+                        </div>
+                      </div>
+                    )}
                   </div>
 
                   <div

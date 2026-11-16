@@ -22,6 +22,8 @@ import {
   Hash,
   ArrowLeft,
   User,
+  Radio,
+  Ban,
 } from 'lucide-react';
 import { apiClient, JWT_TOKEN_KEY } from '../api/apiClient';
 import { SearchableSelect } from '../components/SearchableSelect';
@@ -33,9 +35,10 @@ const MIN_OPTIONS = 2;
 const MAX_OPTIONS = 10;
 
 type SurveyTypeOption = 'SingleChoice' | 'MultipleChoice' | 'Numeric';
-type ModerationStatusOption = 'Active' | 'Pending' | 'Closed' | 'Archived';
+type ModerationStatusOption = 'Active' | 'Pending' | 'Rejected' | 'Closed' | 'Archived';
+type ModerationTab = 'pending' | 'active';
 
-interface PendingSurveyItem {
+interface ModerationSurveyItem {
   surveyId: number;
   surveyText: string;
   surveyType: SurveyTypeOption;
@@ -47,6 +50,7 @@ interface PendingSurveyItem {
   createdAt: string;
   expiresAt: string;
   status: string;
+  rejectionReason?: string | null;
   authorNickname?: string | null;
   options: { optionText: string; orderIndex: number }[];
 }
@@ -59,6 +63,7 @@ interface EditFormState {
   regionTargetId: string;
   expiresAtLocal: string;
   status: ModerationStatusOption;
+  rejectionReason: string;
   options: string[];
 }
 
@@ -173,8 +178,8 @@ function mapRegions(rawList: any[]): DictOption[] {
     .filter((item) => item.id > 0 && item.name.length > 0);
 }
 
-function normalizePendingResponse(raw: any): {
-  items: PendingSurveyItem[];
+function normalizeSurveysResponse(raw: any): {
+  items: ModerationSurveyItem[];
   totalCount: number;
   totalPages: number;
 } {
@@ -188,7 +193,7 @@ function normalizePendingResponse(raw: any): {
     ? raw.surveys
     : [];
 
-  const mapped: PendingSurveyItem[] = rawList.map((item: any, index: number) => {
+  const mapped: ModerationSurveyItem[] = rawList.map((item: any, index: number) => {
     const rawOptions = Array.isArray(item.options ?? item.surveyOptions)
       ? item.options ?? item.surveyOptions
       : [];
@@ -217,6 +222,7 @@ function normalizePendingResponse(raw: any): {
       createdAt: String(item.createdAt ?? item.createdDate ?? ''),
       expiresAt: String(item.expiresAt ?? ''),
       status: String(item.status ?? 'Pending'),
+      rejectionReason: item.rejectionReason ?? null,
       authorNickname: item.authorNickname ?? item.authorName ?? item.author?.nickname ?? null,
       options: sortedOptions,
     };
@@ -237,12 +243,13 @@ export function ModerationPage() {
   const navigate = useNavigate();
 
   const [authorized, setAuthorized] = useState<boolean | null>(null);
+  const [activeTab, setActiveTab] = useState<ModerationTab>('pending');
 
-  // Пагінація та список Pending-опитувань
+  // Пагінація та список опитувань
   const [page, setPage] = useState<number>(1);
   const [totalPages, setTotalPages] = useState<number>(1);
   const [totalCount, setTotalCount] = useState<number>(0);
-  const [surveys, setSurveys] = useState<PendingSurveyItem[]>([]);
+  const [surveys, setSurveys] = useState<ModerationSurveyItem[]>([]);
   const [loadingList, setLoadingList] = useState<boolean>(true);
 
   // Довідники
@@ -256,6 +263,7 @@ export function ModerationPage() {
   const [editForm, setEditForm] = useState<EditFormState | null>(null);
 
   const [saving, setSaving] = useState<boolean>(false);
+  const [archivingId, setArchivingId] = useState<number | null>(null);
   const [pageError, setPageError] = useState<string>('');
   const [formError, setFormError] = useState<string>('');
   const [bannerSuccess, setBannerSuccess] = useState<string>('');
@@ -311,7 +319,7 @@ export function ModerationPage() {
     };
   }, [navigate]);
 
-  // 2. Завантаження списку Pending опитувань при зміні сторінки
+  // 2. Завантаження списку опитувань через єдиний ендпоінт GET /Surveys/moderation?status=...
   useEffect(() => {
     if (authorized !== true) return;
 
@@ -319,13 +327,15 @@ export function ModerationPage() {
     setLoadingList(true);
     setPageError('');
 
+    const statusParam = activeTab === 'pending' ? 'Pending' : 'Active';
+
     apiClient
-      .get('/Surveys/pending', {
-        params: { page, pageSize: PAGE_SIZE },
+      .get('/Surveys/moderation', {
+        params: { status: statusParam, page, pageSize: PAGE_SIZE },
       })
       .then((res) => {
         if (!isMounted) return;
-        const normalized = normalizePendingResponse(res.data);
+        const normalized = normalizeSurveysResponse(res.data);
         setSurveys(normalized.items);
         setTotalCount(normalized.totalCount);
         setTotalPages(normalized.totalPages);
@@ -337,7 +347,7 @@ export function ModerationPage() {
           return;
         }
         const msg = err.response?.data?.message || err.message;
-        setPageError(`Не вдалося завантажити чергу модерації: ${msg}`);
+        setPageError(`Не вдалося завантажити список опитувань: ${msg}`);
       })
       .finally(() => {
         if (isMounted) setLoadingList(false);
@@ -346,7 +356,17 @@ export function ModerationPage() {
     return () => {
       isMounted = false;
     };
-  }, [authorized, page, navigate]);
+  }, [authorized, activeTab, page, navigate]);
+
+  const handleTabSwitch = (tab: ModerationTab) => {
+    if (tab === activeTab) return;
+    setActiveTab(tab);
+    setPage(1);
+    setExpandedSurveyId(null);
+    setEditForm(null);
+    setFormError('');
+    setBannerSuccess('');
+  };
 
   const fetchTopicsForDomain = async (domainId: string): Promise<DictOption[]> => {
     if (!domainId) return [];
@@ -359,7 +379,7 @@ export function ModerationPage() {
   };
 
   // Відкриття/закриття меню редагування конкретного опитування при кліку
-  const handleSelectSurvey = async (survey: PendingSurveyItem) => {
+  const handleSelectSurvey = async (survey: ModerationSurveyItem) => {
     setFormError('');
     setBannerSuccess('');
 
@@ -377,6 +397,8 @@ export function ModerationPage() {
         : ['', ''];
 
     const initialDomainId = survey.domainId ? String(survey.domainId) : '';
+    const defaultStatus: ModerationStatusOption =
+      activeTab === 'active' ? 'Archived' : 'Active';
 
     setExpandedSurveyId(survey.surveyId);
     setEditForm({
@@ -386,11 +408,11 @@ export function ModerationPage() {
       topicId: survey.topicId ? String(survey.topicId) : '',
       regionTargetId: survey.regionTargetId ? String(survey.regionTargetId) : '',
       expiresAtLocal: toDatetimeLocalValue(survey.expiresAt),
-      status: 'Active',
+      status: defaultStatus,
+      rejectionReason: survey.rejectionReason ?? '',
       options: initialOptions,
     });
 
-    // Підтягуємо теми для галузі, щоб коректно відобразити обрану тему
     if (survey.topicId > 0 && surveyDomains.length > 0) {
       setLoadingEditMeta(true);
       try {
@@ -418,6 +440,47 @@ export function ModerationPage() {
       } finally {
         setLoadingEditMeta(false);
       }
+    }
+  };
+
+  // Швидка примусова архівація активного опитування (FR 6.3)
+  const handleQuickArchive = async (
+    e: React.MouseEvent,
+    surveyId: number
+  ) => {
+    e.stopPropagation();
+    if (archivingId !== null) return;
+
+    const confirmed = window.confirm(
+      `Ви впевнені, що хочете примусово архівувати опитування #${surveyId} і зняти його з публікації?`
+    );
+    if (!confirmed) return;
+
+    setArchivingId(surveyId);
+    setPageError('');
+    setBannerSuccess('');
+
+    try {
+      await apiClient.patch(`/Surveys/${surveyId}/moderate`, {
+        status: 'Archived',
+      });
+
+      setBannerSuccess(`Опитування #${surveyId} примусово переведено в архів (Archived).`);
+      setSurveys((prev) => prev.filter((item) => item.surveyId !== surveyId));
+      setTotalCount((prev) => Math.max(0, prev - 1));
+      if (expandedSurveyId === surveyId) {
+        setExpandedSurveyId(null);
+        setEditForm(null);
+      }
+    } catch (err: any) {
+      const status = err.response?.status;
+      const msg =
+        err.response?.data?.message ||
+        err.response?.data?.title ||
+        err.message;
+      setPageError(`Не вдалося архівувати опитування (${status || 'мережа'}): ${msg}`);
+    } finally {
+      setArchivingId(null);
     }
   };
 
@@ -483,6 +546,13 @@ export function ModerationPage() {
       return;
     }
 
+    // Перевірка обов'язкової причини при відхиленні (FR 6.2)
+    const trimmedReason = editForm.rejectionReason.trim();
+    if (editForm.status === 'Rejected' && trimmedReason.length < 3) {
+      setFormError('При відхиленні опитування обов’язково вкажіть причину (щонайменше 3 символи).');
+      return;
+    }
+
     const isChoice =
       editForm.surveyType === 'SingleChoice' || editForm.surveyType === 'MultipleChoice';
     const cleanedOptions = editForm.options
@@ -520,6 +590,7 @@ export function ModerationPage() {
       regionTargetId: editForm.regionTargetId ? Number(editForm.regionTargetId) : null,
       expiresAt: parsedExpires.toISOString(),
       status: editForm.status,
+      rejectionReason: editForm.status === 'Rejected' ? trimmedReason : null,
       options: isChoice
         ? cleanedOptions.map((text, idx) => ({
             optionText: text,
@@ -534,8 +605,10 @@ export function ModerationPage() {
       const statusLabel =
         editForm.status === 'Active'
           ? 'схвалено та активовано (Active)'
+          : editForm.status === 'Rejected'
+          ? `відхилено (Rejected). Причина: «${trimmedReason}»`
           : editForm.status === 'Archived'
-          ? 'відхилено та перенесено в архів (Archived)'
+          ? 'перенесено в архів (Archived)'
           : editForm.status === 'Closed'
           ? 'закрито (Closed)'
           : 'оновлено та залишено на модерації (Pending)';
@@ -544,8 +617,12 @@ export function ModerationPage() {
       setExpandedSurveyId(null);
       setEditForm(null);
 
-      // Якщо статус змінився з Pending — прибираємо зі списку очікування
-      if (editForm.status !== 'Pending') {
+      // Якщо статус більше не відповідає поточній вкладці — прибираємо зі списку
+      const stillMatchesTab =
+        (activeTab === 'pending' && editForm.status === 'Pending') ||
+        (activeTab === 'active' && editForm.status === 'Active');
+
+      if (!stillMatchesTab) {
         setSurveys((prev) => prev.filter((item) => item.surveyId !== surveyId));
         setTotalCount((prev) => Math.max(0, prev - 1));
       } else {
@@ -602,8 +679,8 @@ export function ModerationPage() {
 
   return (
     <div className="w-full max-w-3xl mx-auto space-y-5">
-      {/* Верхня панель */}
-      <div className="bg-card border border-line rounded-3xl p-6 sm:p-7 shadow-sm space-y-3">
+      {/* Верхня панель та перемикач вкладок */}
+      <div className="bg-card border border-line rounded-3xl p-6 sm:p-7 shadow-sm space-y-5">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div className="space-y-1">
             <div className="inline-flex items-center gap-2 text-xs font-semibold text-emerald-500">
@@ -611,18 +688,63 @@ export function ModerationPage() {
               <span>Панель модератора</span>
             </div>
             <h1 className="text-xl sm:text-2xl font-bold text-main tracking-tight">
-              Опитування на модерації
+              {activeTab === 'pending' ? 'Опитування на модерації' : 'Активні опитування'}
             </h1>
             <p className="text-xs sm:text-sm text-muted">
-              Натисніть на опитування зі списку, щоб відредагувати його поля, варіанти відповідей або
-              змінити статус.
+              {activeTab === 'pending'
+                ? 'Перевіряйте нові опитування, редагуйте поля, схвалюйте або відхиляйте із зазначенням причини.'
+                : 'Керуйте опублікованими опитуваннями або примусово переводьте їх в архів.'}
             </p>
           </div>
 
-          <div className="inline-flex items-center gap-2 px-3.5 py-2.5 rounded-xl bg-amber-500/10 border border-amber-500/25 text-amber-500 text-xs sm:text-sm font-semibold self-start sm:self-center">
-            <Clock className="w-4 h-4 shrink-0" />
-            <span>Очікують перевірки: {totalCount}</span>
+          <div
+            className={`inline-flex items-center gap-2 px-3.5 py-2.5 rounded-xl border text-xs sm:text-sm font-semibold self-start sm:self-center ${
+              activeTab === 'pending'
+                ? 'bg-amber-500/10 border-amber-500/25 text-amber-500'
+                : 'bg-emerald-500/10 border-emerald-500/25 text-emerald-500'
+            }`}
+          >
+            {activeTab === 'pending' ? (
+              <>
+                <Clock className="w-4 h-4 shrink-0" />
+                <span>Очікують перевірки: {totalCount}</span>
+              </>
+            ) : (
+              <>
+                <Radio className="w-4 h-4 shrink-0" />
+                <span>Активних зараз: {totalCount}</span>
+              </>
+            )}
           </div>
+        </div>
+
+        {/* Вкладки навігації модерації */}
+        <div className="grid grid-cols-2 gap-2 p-1.5 rounded-2xl bg-app border border-line">
+          <button
+            type="button"
+            onClick={() => handleTabSwitch('pending')}
+            className={`py-2.5 px-4 rounded-xl text-xs sm:text-sm font-semibold inline-flex items-center justify-center gap-2 transition cursor-pointer ${
+              activeTab === 'pending'
+                ? 'bg-card text-main shadow-sm border border-line'
+                : 'text-muted hover:text-main'
+            }`}
+          >
+            <Clock className="w-4 h-4 text-amber-500 shrink-0" />
+            <span>На модерації</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => handleTabSwitch('active')}
+            className={`py-2.5 px-4 rounded-xl text-xs sm:text-sm font-semibold inline-flex items-center justify-center gap-2 transition cursor-pointer ${
+              activeTab === 'active'
+                ? 'bg-card text-main shadow-sm border border-line'
+                : 'text-muted hover:text-main'
+            }`}
+          >
+            <Radio className="w-4 h-4 text-emerald-500 shrink-0" />
+            <span>Активні опитування</span>
+          </button>
         </div>
       </div>
 
@@ -641,7 +763,7 @@ export function ModerationPage() {
         </div>
       )}
 
-      {/* Список опитувань Pending */}
+      {/* Список опитувань */}
       {loadingList ? (
         <div className="space-y-3">
           {[1, 2, 3].map((skeleton) => (
@@ -663,10 +785,14 @@ export function ModerationPage() {
             <CheckCircle2 className="w-6 h-6" />
           </div>
           <h2 className="text-base sm:text-lg font-bold text-main">
-            Черга модерації порожня
+            {activeTab === 'pending'
+              ? 'Черга модерації порожня'
+              : 'Активних опитувань не знайдено'}
           </h2>
           <p className="text-xs sm:text-sm text-muted max-w-md mx-auto">
-            Усі опитування зі статусом Pending вже перевірені.
+            {activeTab === 'pending'
+              ? 'Усі опитування зі статусом Pending вже перевірені.'
+              : 'Наразі немає опублікованих опитувань для відображення.'}
           </p>
         </div>
       ) : (
@@ -687,35 +813,38 @@ export function ModerationPage() {
                   isExpanded ? 'border-accent/60' : 'border-line hover:border-accent/40'
                 }`}
               >
-                {/* Згорнутий рядок опитування (як у «Моїх опитуваннях») */}
-                <button
-                  type="button"
-                  onClick={() => handleSelectSurvey(survey)}
-                  aria-expanded={isExpanded}
-                  className="w-full text-left p-5 sm:p-6 flex items-center justify-between gap-4 cursor-pointer transition hover:bg-app/40"
-                >
-                  <div className="space-y-2.5 min-w-0 flex-1">
+                {/* Заголовок картки опитування */}
+                <div className="p-5 sm:p-6 flex items-center justify-between gap-4">
+                  <button
+                    type="button"
+                    onClick={() => handleSelectSurvey(survey)}
+                    aria-expanded={isExpanded}
+                    className="text-left space-y-2.5 min-w-0 flex-1 cursor-pointer group"
+                  >
                     <div className="flex flex-wrap items-center gap-2">
-                      {/* Статус Pending */}
-                      <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-amber-500/10 border border-amber-500/25 text-amber-500 text-xs font-semibold">
-                        <Clock className="w-3.5 h-3.5" />
-                        <span>На модерації</span>
-                      </span>
+                      {activeTab === 'pending' ? (
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-amber-500/10 border border-amber-500/25 text-amber-500 text-xs font-semibold">
+                          <Clock className="w-3.5 h-3.5" />
+                          <span>На модерації</span>
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/25 text-emerald-500 text-xs font-semibold">
+                          <Radio className="w-3.5 h-3.5" />
+                          <span>Активне</span>
+                        </span>
+                      )}
 
-                      {/* Тип опитування */}
                       <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-accent/10 border border-accent/25 text-accent text-xs font-medium">
                         <Layers className="w-3.5 h-3.5" />
                         <span>{formatSurveyTypeLabel(survey.surveyType)}</span>
                       </span>
 
-                      {/* Тема (якщо передана) */}
                       {survey.topicName && (
                         <span className="px-2.5 py-0.5 rounded-full bg-app border border-line text-xs text-muted">
                           {survey.topicName}
                         </span>
                       )}
 
-                      {/* Автор (якщо переданий) */}
                       {survey.authorNickname && (
                         <span className="inline-flex items-center gap-1 text-xs text-muted">
                           <User className="w-3 h-3" />
@@ -724,20 +853,39 @@ export function ModerationPage() {
                       )}
                     </div>
 
-                    {/* Текст опитування */}
-                    <h2 className="text-base sm:text-lg font-bold text-main leading-snug">
+                    <h2 className="text-base sm:text-lg font-bold text-main group-hover:text-accent transition leading-snug">
                       {survey.surveyText}
                     </h2>
-                  </div>
+                  </button>
 
-                  <div
-                    className={`w-9 h-9 rounded-xl bg-app border border-line flex items-center justify-center text-muted shrink-0 transition-transform duration-200 ${
-                      isExpanded ? 'rotate-180 text-accent border-accent/40' : ''
-                    }`}
-                  >
-                    <ChevronDown className="w-4 h-4" />
+                  <div className="flex items-center gap-2 shrink-0">
+                    {/* Швидка кнопка архівації для вкладки Активних опитувань (FR 6.3) */}
+                    {activeTab === 'active' && (
+                      <button
+                        type="button"
+                        disabled={archivingId === survey.surveyId}
+                        onClick={(e) => handleQuickArchive(e, survey.surveyId)}
+                        title="Примусово архівувати опитування"
+                        className="px-3 py-2 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/25 text-rose-500 text-xs font-semibold inline-flex items-center gap-1.5 transition cursor-pointer disabled:opacity-50"
+                      >
+                        <Archive className="w-3.5 h-3.5" />
+                        <span className="hidden sm:inline">
+                          {archivingId === survey.surveyId ? 'Архівація...' : 'Архівувати'}
+                        </span>
+                      </button>
+                    )}
+
+                    <button
+                      type="button"
+                      onClick={() => handleSelectSurvey(survey)}
+                      className={`w-9 h-9 rounded-xl bg-app border border-line flex items-center justify-center text-muted transition-transform duration-200 cursor-pointer ${
+                        isExpanded ? 'rotate-180 text-accent border-accent/40' : ''
+                      }`}
+                    >
+                      <ChevronDown className="w-4 h-4" />
+                    </button>
                   </div>
-                </button>
+                </div>
 
                 {/* Меню редагування опитування при натисканні */}
                 {isExpanded && editForm && (
@@ -896,7 +1044,7 @@ export function ModerationPage() {
                       </div>
                     </div>
 
-                    {/* Варіанти відповідей (для SingleChoice / MultipleChoice) */}
+                    {/* Варіанти відповідей */}
                     {isChoiceType ? (
                       <div className="space-y-2.5">
                         <div className="flex items-center justify-between">
@@ -974,6 +1122,19 @@ export function ModerationPage() {
 
                         <button
                           type="button"
+                          onClick={() => setEditForm({ ...editForm, status: 'Rejected' })}
+                          className={`py-2.5 px-3 rounded-xl border text-xs font-semibold inline-flex items-center justify-center gap-1.5 transition cursor-pointer ${
+                            editForm.status === 'Rejected'
+                              ? 'bg-rose-500/15 border-rose-500 text-rose-500'
+                              : 'bg-card border-line text-muted hover:text-main'
+                          }`}
+                        >
+                          <Ban className="w-4 h-4 shrink-0" />
+                          <span>Відхилити</span>
+                        </button>
+
+                        <button
+                          type="button"
                           onClick={() => setEditForm({ ...editForm, status: 'Pending' })}
                           className={`py-2.5 px-3 rounded-xl border text-xs font-semibold inline-flex items-center justify-center gap-1.5 transition cursor-pointer ${
                             editForm.status === 'Pending'
@@ -987,31 +1148,51 @@ export function ModerationPage() {
 
                         <button
                           type="button"
-                          onClick={() => setEditForm({ ...editForm, status: 'Closed' })}
+                          onClick={() => setEditForm({ ...editForm, status: 'Archived' })}
                           className={`py-2.5 px-3 rounded-xl border text-xs font-semibold inline-flex items-center justify-center gap-1.5 transition cursor-pointer ${
-                            editForm.status === 'Closed'
+                            editForm.status === 'Archived'
                               ? 'bg-accent/15 border-accent text-accent'
                               : 'bg-card border-line text-muted hover:text-main'
                           }`}
                         >
                           <Archive className="w-4 h-4 shrink-0" />
-                          <span>Закрити</span>
-                        </button>
-
-                        <button
-                          type="button"
-                          onClick={() => setEditForm({ ...editForm, status: 'Archived' })}
-                          className={`py-2.5 px-3 rounded-xl border text-xs font-semibold inline-flex items-center justify-center gap-1.5 transition cursor-pointer ${
-                            editForm.status === 'Archived'
-                              ? 'bg-rose-500/15 border-rose-500 text-rose-500'
-                              : 'bg-card border-line text-muted hover:text-main'
-                          }`}
-                        >
-                          <XCircle className="w-4 h-4 shrink-0" />
                           <span>В архів</span>
                         </button>
                       </div>
                     </div>
+
+                    {/* Обов'язкове поле причини відхилення при статусі Rejected (FR 6.2) */}
+                    {editForm.status === 'Rejected' && (
+                      <div className="p-4 rounded-2xl bg-rose-500/5 border border-rose-500/30 space-y-2">
+                        <div className="flex items-center justify-between text-xs">
+                          <label className="font-semibold text-rose-500 flex items-center gap-1.5">
+                            <XCircle className="w-4 h-4" />
+                            <span>
+                              Причина відхилення опитування <span className="text-rose-500">*</span>
+                            </span>
+                          </label>
+                          <span className="text-muted font-mono">
+                            {editForm.rejectionReason.length}/500
+                          </span>
+                        </div>
+                        <textarea
+                          required
+                          rows={2}
+                          minLength={3}
+                          maxLength={500}
+                          value={editForm.rejectionReason}
+                          onChange={(e) =>
+                            setEditForm({
+                              ...editForm,
+                              rejectionReason: e.target.value,
+                            })
+                          }
+                          placeholder="Опишіть причину відхилення (наприклад: нецензурна лексика, дублювання або некоректні варіанти відповіді)..."
+                          className="w-full px-3.5 py-2.5 rounded-xl bg-card border border-rose-500/40 text-main text-sm placeholder:text-muted focus:border-rose-500 outline-none transition resize-none"
+                          autoFocus
+                        />
+                      </div>
+                    )}
 
                     {/* Кнопки збереження / скасування */}
                     <div className="flex flex-wrap justify-end gap-3 pt-3 border-t border-line">
@@ -1030,10 +1211,20 @@ export function ModerationPage() {
                       <button
                         type="submit"
                         disabled={saving}
-                        className="px-5 py-2.5 rounded-xl bg-accent hover:bg-accent-hover disabled:opacity-50 text-accent-text text-sm font-semibold inline-flex items-center gap-2 transition shadow-sm cursor-pointer"
+                        className={`px-5 py-2.5 rounded-xl disabled:opacity-50 text-sm font-semibold inline-flex items-center gap-2 transition shadow-sm cursor-pointer ${
+                          editForm.status === 'Rejected'
+                            ? 'bg-rose-600 hover:bg-rose-500 text-white'
+                            : 'bg-accent hover:bg-accent-hover text-accent-text'
+                        }`}
                       >
                         <Save className="w-4 h-4" />
-                        <span>{saving ? 'Збереження...' : 'Зберегти зміни'}</span>
+                        <span>
+                          {saving
+                            ? 'Збереження...'
+                            : editForm.status === 'Rejected'
+                            ? 'Відхилити опитування'
+                            : 'Зберегти зміни'}
+                        </span>
                       </button>
                     </div>
                   </form>

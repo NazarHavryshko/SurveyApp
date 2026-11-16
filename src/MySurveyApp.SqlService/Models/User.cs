@@ -47,6 +47,9 @@ namespace MySurveyApp.SqlService.Models
         [Column("available_question_tokens")]
         public int AvailableQuestionTokens { get; set; } = 0;
 
+        [Column("last_active_at")]
+        public DateTime LastActiveAt { get; set; } = DateTime.UtcNow;
+
 
 
         [ForeignKey(nameof(OccupationId))]
