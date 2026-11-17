@@ -73,8 +73,6 @@ public class InternalAnalyticsController : ControllerBase
             .Select(o => o.OptionText)
             .ToList();
 
-        // Інкремент лічильника відповідей та фіксація взаємодії в одній транзакції
-        user.AnswersCount += 1;
 
         _context.Set<SurveyInteraction>().Add(new SurveyInteraction
         {

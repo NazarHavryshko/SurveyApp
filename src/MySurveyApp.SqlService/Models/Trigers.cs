@@ -53,8 +53,8 @@
 
                 IF v_current_answers >= 10 THEN
                     UPDATE users
-                    SET available_question_tokens = available_question_tokens + 1,
-                        answers_count = 0
+                    SET available_question_tokens = available_question_tokens + (v_current_answers / 10),
+                        answers_count = v_current_answers % 10
                     WHERE user_id = NEW.user_id;
                 END IF;
 
@@ -67,6 +67,12 @@
             AFTER INSERT ON survey_interaction
             FOR EACH ROW
             EXECUTE FUNCTION handle_user_interaction_gamification();
+
+            -- Вирівнюємо існуючих користувачів, у яких answers_count >= 10
+            UPDATE users
+            SET available_question_tokens = available_question_tokens + (answers_count / 10),
+                answers_count = answers_count % 10
+            WHERE answers_count >= 10;
         ";
     }
 }

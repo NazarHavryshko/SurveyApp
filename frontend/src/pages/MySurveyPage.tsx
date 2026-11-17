@@ -15,6 +15,10 @@ import {
   Layers,
   ListChecks,
   Download,
+  MessageSquare,
+  Send,
+  Reply,
+  CornerDownRight,
 } from 'lucide-react';
 import { apiClient, JWT_TOKEN_KEY } from '../api/apiClient';
 import type { AuthUserResponse } from '../types/auth';
@@ -52,6 +56,29 @@ interface SurveyDiagramResponse {
   surveyType?: string;
   totalResponses: number;
   items: DiagramItem[];
+}
+
+interface CommentReply {
+  replyId: number;
+  createdAt: string;
+  text: string;
+  nickname: string;
+}
+
+interface SurveyComment {
+  commentId: number;
+  createdAt: string;
+  text: string;
+  nickname: string;
+  nextReplyId: number;
+  replies: CommentReply[];
+}
+
+interface CommentsApiResponse {
+  id: string;
+  surveyId: number;
+  nextCommentId: number;
+  comments: SurveyComment[];
 }
 
 function isMultipleChoiceType(rawType?: string | number | null): boolean {
@@ -311,6 +338,17 @@ export function MySurveysPage() {
   const [csvErrorBySurvey, setCsvErrorBySurvey] = useState<Record<string, string>>({});
   const [downloadingCsvId, setDownloadingCsvId] = useState<string | null>(null);
 
+  // Стейт коментарів для кожного опитування
+  const [commentsBySurvey, setCommentsBySurvey] = useState<Record<string, SurveyComment[]>>({});
+  const [loadingCommentsBySurvey, setLoadingCommentsBySurvey] = useState<Record<string, boolean>>({});
+  const [newCommentBySurvey, setNewCommentBySurvey] = useState<Record<string, string>>({});
+  const [submittingCommentBySurvey, setSubmittingCommentBySurvey] = useState<Record<string, boolean>>({});
+
+  // Стейт відповідей на коментарі
+  const [replyingTo, setReplyingTo] = useState<{ surveyKey: string; commentId: number } | null>(null);
+  const [replyText, setReplyText] = useState<string>('');
+  const [submittingReply, setSubmittingReply] = useState<boolean>(false);
+
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string>('');
 
@@ -375,6 +413,22 @@ export function MySurveysPage() {
     };
   }, [navigate]);
 
+  const fetchSurveyComments = async (surveyId: string | number) => {
+    const key = String(surveyId);
+    setLoadingCommentsBySurvey((prev) => ({ ...prev, [key]: true }));
+    try {
+      const res = await apiClient.get<CommentsApiResponse>(`/internal/surveys/${surveyId}/comments`);
+      setCommentsBySurvey((prev) => ({
+        ...prev,
+        [key]: Array.isArray(res.data?.comments) ? res.data.comments : [],
+      }));
+    } catch {
+      setCommentsBySurvey((prev) => ({ ...prev, [key]: [] }));
+    } finally {
+      setLoadingCommentsBySurvey((prev) => ({ ...prev, [key]: false }));
+    }
+  };
+
   const canCreateSurvey = tokens > 0;
 
   const handleCreateClick = () => {
@@ -384,10 +438,67 @@ export function MySurveysPage() {
 
   const toggleSurvey = (id: string | number) => {
     const key = String(id);
+    const willExpand = !expandedIds[key];
+
     setExpandedIds((prev) => ({
       ...prev,
-      [key]: !prev[key],
+      [key]: willExpand,
     }));
+
+    if (willExpand && !commentsBySurvey[key]) {
+      fetchSurveyComments(id);
+    }
+  };
+
+  const handleAddComment = async (e: React.FormEvent, surveyId: string | number) => {
+    e.preventDefault();
+    const key = String(surveyId);
+    const text = (newCommentBySurvey[key] || '').trim();
+    if (!text || submittingCommentBySurvey[key]) return;
+
+    setSubmittingCommentBySurvey((prev) => ({ ...prev, [key]: true }));
+    try {
+      await apiClient.post(`/internal/surveys/${surveyId}/comments`, {
+        text,
+        parentCommentId: null,
+      });
+      setNewCommentBySurvey((prev) => ({ ...prev, [key]: '' }));
+      await fetchSurveyComments(surveyId);
+    } catch (err: any) {
+      const msg =
+        err.response?.data?.detail ||
+        err.response?.data?.message ||
+        err.response?.data?.title ||
+        'Не вдалося додати коментар';
+      alert(msg);
+    } finally {
+      setSubmittingCommentBySurvey((prev) => ({ ...prev, [key]: false }));
+    }
+  };
+
+  const handleAddReply = async (surveyId: string | number, parentCommentId: number) => {
+    const trimmed = replyText.trim();
+    if (!trimmed || submittingReply) return;
+
+    setSubmittingReply(true);
+    try {
+      await apiClient.post(`/internal/surveys/${surveyId}/comments`, {
+        text: trimmed,
+        parentCommentId,
+      });
+      setReplyText('');
+      setReplyingTo(null);
+      await fetchSurveyComments(surveyId);
+    } catch (err: any) {
+      const msg =
+        err.response?.data?.detail ||
+        err.response?.data?.message ||
+        err.response?.data?.title ||
+        'Не вдалося додати відповідь';
+      alert(msg);
+    } finally {
+      setSubmittingReply(false);
+    }
   };
 
   const handleDownloadCsv = async (surveyId: string | number) => {
@@ -454,8 +565,8 @@ export function MySurveysPage() {
               Мої опитування
             </h1>
             <p className="text-xs sm:text-sm text-muted">
-              Натисніть на опитування зі списку, щоб переглянути результати відповідей та вивантажити
-              CSV-звіт.
+              Натисніть на опитування зі списку, щоб переглянути результати відповідей, коментарі та
+              вивантажити CSV-звіт.
             </p>
           </div>
 
@@ -551,6 +662,11 @@ export function MySurveysPage() {
             const csvError = csvErrorBySurvey[key];
             const rejectedWithReason =
               isSurveyRejected(survey.status) && Boolean(survey.rejectionReason);
+
+            const comments = commentsBySurvey[key] ?? [];
+            const isLoadingComments = Boolean(loadingCommentsBySurvey[key]);
+            const commentInput = newCommentBySurvey[key] ?? '';
+            const isSubmittingComment = Boolean(submittingCommentBySurvey[key]);
 
             return (
               <article
@@ -739,6 +855,144 @@ export function MySurveysPage() {
                         ))}
                       </div>
                     )}
+
+                    {/* Секція коментарів до опитування */}
+                    <div className="pt-4 border-t border-line space-y-4">
+                      <div className="flex items-center gap-2 text-xs sm:text-sm font-semibold text-main">
+                        <MessageSquare className="w-4 h-4 text-accent" />
+                        <span>Коментарі ({comments.length})</span>
+                      </div>
+
+                      {/* Форма додавання коментаря автора */}
+                      <form
+                        onSubmit={(e) => handleAddComment(e, survey.id)}
+                        className="flex gap-2"
+                      >
+                        <input
+                          type="text"
+                          value={commentInput}
+                          onChange={(e) =>
+                            setNewCommentBySurvey((prev) => ({
+                              ...prev,
+                              [key]: e.target.value,
+                            }))
+                          }
+                          placeholder="Напишіть коментар або уточнення до свого опитування..."
+                          className="flex-1 px-3.5 py-2 rounded-xl bg-card border border-line text-xs sm:text-sm text-main placeholder:text-muted focus:outline-none focus:border-accent transition"
+                        />
+                        <button
+                          type="submit"
+                          disabled={!commentInput.trim() || isSubmittingComment}
+                          className="px-3.5 py-2 rounded-xl bg-accent hover:bg-accent-hover text-accent-text font-medium text-xs sm:text-sm inline-flex items-center gap-1.5 transition cursor-pointer disabled:opacity-50"
+                        >
+                          <Send className="w-3.5 h-3.5" />
+                          <span className="hidden sm:inline">Надіслати</span>
+                        </button>
+                      </form>
+
+                      {isLoadingComments ? (
+                        <div className="space-y-2 animate-pulse">
+                          <div className="h-14 bg-card rounded-xl" />
+                          <div className="h-14 bg-card rounded-xl" />
+                        </div>
+                      ) : comments.length === 0 ? (
+                        <p className="text-xs text-muted py-1">
+                          Коментарів до цього опитування поки немає.
+                        </p>
+                      ) : (
+                        <div className="space-y-3">
+                          {comments.map((comment) => {
+                            const isReplyingHere =
+                              replyingTo?.surveyKey === key &&
+                              replyingTo?.commentId === comment.commentId;
+
+                            return (
+                              <div
+                                key={comment.commentId}
+                                className="p-3.5 rounded-xl bg-card border border-line space-y-2.5"
+                              >
+                                <div className="flex items-start justify-between gap-2">
+                                  <div>
+                                    <span className="text-xs sm:text-sm font-semibold text-main">
+                                      {comment.nickname || 'Користувач'}
+                                    </span>
+                                    <span className="ml-2 text-[11px] text-muted">
+                                      {formatDate(comment.createdAt)}
+                                    </span>
+                                  </div>
+
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setReplyingTo(
+                                        isReplyingHere
+                                          ? null
+                                          : { surveyKey: key, commentId: comment.commentId }
+                                      );
+                                      setReplyText('');
+                                    }}
+                                    className="text-xs text-muted hover:text-accent inline-flex items-center gap-1 transition cursor-pointer"
+                                  >
+                                    <Reply className="w-3.5 h-3.5" />
+                                    <span>Відповісти</span>
+                                  </button>
+                                </div>
+
+                                <p className="text-xs sm:text-sm text-main/90 whitespace-pre-wrap break-words">
+                                  {comment.text}
+                                </p>
+
+                                {isReplyingHere && (
+                                  <div className="pt-1 flex gap-2">
+                                    <input
+                                      type="text"
+                                      value={replyText}
+                                      onChange={(e) => setReplyText(e.target.value)}
+                                      placeholder={`Відповідь для ${comment.nickname || 'користувача'}...`}
+                                      className="flex-1 px-3 py-1.5 rounded-lg bg-app border border-line text-xs text-main placeholder:text-muted focus:outline-none focus:border-accent"
+                                      autoFocus
+                                    />
+                                    <button
+                                      type="button"
+                                      onClick={() => handleAddReply(survey.id, comment.commentId)}
+                                      disabled={!replyText.trim() || submittingReply}
+                                      className="px-3 py-1.5 rounded-lg bg-accent hover:bg-accent-hover text-accent-text text-xs font-medium transition cursor-pointer disabled:opacity-50"
+                                    >
+                                      Відповісти
+                                    </button>
+                                  </div>
+                                )}
+
+                                {Array.isArray(comment.replies) && comment.replies.length > 0 && (
+                                  <div className="pl-3 sm:pl-5 pt-1.5 space-y-2 border-l-2 border-line">
+                                    {comment.replies.map((reply) => (
+                                      <div
+                                        key={reply.replyId}
+                                        className="p-2.5 rounded-lg bg-app/70 border border-line/60 space-y-1"
+                                      >
+                                        <div className="flex items-center gap-1.5">
+                                          <CornerDownRight className="w-3 h-3 text-accent shrink-0" />
+                                          <span className="text-xs font-semibold text-main">
+                                            {reply.nickname || 'Користувач'}
+                                          </span>
+                                          <span className="text-[11px] text-muted">
+                                            {formatDate(reply.createdAt)}
+                                          </span>
+                                        </div>
+
+                                        <p className="text-xs text-main/90 pl-4 whitespace-pre-wrap break-words">
+                                          {reply.text}
+                                        </p>
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
                   </div>
                 )}
               </article>

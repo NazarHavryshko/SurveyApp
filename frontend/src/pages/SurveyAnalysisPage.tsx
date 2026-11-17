@@ -14,8 +14,9 @@ import {
   Reply,
   Trash2,
   CornerDownRight,
+  LogIn,
 } from 'lucide-react';
-import { apiClient } from '../api/apiClient';
+import { apiClient, JWT_TOKEN_KEY } from '../api/apiClient';
 import { SurveyChart } from '../components/SurveyChart';
 import { SAVED_FILTERS_KEY } from './SurveysFilterPage';
 import {
@@ -78,6 +79,9 @@ export function SurveyAnalysisPage() {
   const location = useLocation();
   const navigate = useNavigate();
 
+  // Перевірка авторизації користувача
+  const isAuthenticated = Boolean(localStorage.getItem(JWT_TOKEN_KEY));
+
   // Зчитуємо параметри, передані через роутер
   const passedState = location.state as {
     questionText?: string;
@@ -90,9 +94,10 @@ export function SurveyAnalysisPage() {
 
   // Визначення прав адміністратора
   const isAdmin =
-    localStorage.getItem('userRole') === 'Admin' ||
-    localStorage.getItem('role') === 'Admin' ||
-    localStorage.getItem('isAdmin') === 'true';
+    isAuthenticated &&
+    (localStorage.getItem('userRole') === 'Admin' ||
+      localStorage.getItem('role') === 'Admin' ||
+      localStorage.getItem('isAdmin') === 'true');
 
   // Стейт діаграми
   const [data, setData] = useState<SurveyDiagramData | null>(null);
@@ -182,19 +187,21 @@ export function SurveyAnalysisPage() {
         if (isMounted) setLoading(false);
       });
 
-    // 2. Запит №2: перевірка чи відстежується опитування (bookmark status)
-    apiClient
-      .get<{ isBookmarked: boolean }>(`/Surveys/${id}/bookmark/status`)
-      .then((res) => {
-        if (isMounted) {
-          setIsBookmarked(Boolean(res.data?.isBookmarked));
-        }
-      })
-      .catch(() => {
-        // Ігноруємо помилки статусу закладок якщо юзер гість
-      });
+    // 2. Запит №2: перевірка чи відстежується опитування (тільки для авторизованих)
+    if (isAuthenticated) {
+      apiClient
+        .get<{ isBookmarked: boolean }>(`/Surveys/${id}/bookmark/status`)
+        .then((res) => {
+          if (isMounted) {
+            setIsBookmarked(Boolean(res.data?.isBookmarked));
+          }
+        })
+        .catch(() => {
+          // Ігноруємо помилки статусу закладок
+        });
+    }
 
-    // 3. Запит №3 (паралельний у фоні): підвантаження наступного питання (лише якщо це режим проходження, а не перегляд закладок)
+    // 3. Запит №3 (паралельний у фоні): підвантаження наступного питання
     if (!isFromBookmarks) {
       const rawFilters = localStorage.getItem(SAVED_FILTERS_KEY);
       if (rawFilters) {
@@ -219,11 +226,11 @@ export function SurveyAnalysisPage() {
     return () => {
       isMounted = false;
     };
-  }, [id, navigate, passedQuestionText, isFromBookmarks, fetchComments]);
+  }, [id, navigate, passedQuestionText, isFromBookmarks, isAuthenticated, fetchComments]);
 
   // Почати / перестати відстежувати опитування
   const handleToggleBookmark = async () => {
-    if (!id || bookmarkLoading) return;
+    if (!id || !isAuthenticated || bookmarkLoading) return;
     try {
       setBookmarkLoading(true);
       if (isBookmarked) {
@@ -247,7 +254,7 @@ export function SurveyAnalysisPage() {
   // Додавання основного коментаря
   const handleAddComment = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!id || !newCommentText.trim() || submittingComment) return;
+    if (!id || !isAuthenticated || !newCommentText.trim() || submittingComment) return;
 
     try {
       setSubmittingComment(true);
@@ -274,7 +281,7 @@ export function SurveyAnalysisPage() {
 
   // Додавання відповіді на коментар
   const handleAddReply = async (parentCommentId: number) => {
-    if (!id || !replyText.trim() || submittingReply) return;
+    if (!id || !isAuthenticated || !replyText.trim() || submittingReply) return;
 
     try {
       setSubmittingReply(true);
@@ -380,20 +387,22 @@ export function SurveyAnalysisPage() {
             <span>Статистика відповідей • #{id}</span>
           </div>
 
-          {/* Кнопка відстеження опитування (додати/видалити з закладок) */}
-          <button
-            type="button"
-            onClick={handleToggleBookmark}
-            disabled={bookmarkLoading}
-            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-medium transition cursor-pointer disabled:opacity-50 ${
-              isBookmarked
-                ? 'bg-accent/15 border-accent text-accent'
-                : 'bg-app border-line text-muted hover:text-main hover:border-accent'
-            }`}
-          >
-            <Bookmark className={`w-3.5 h-3.5 ${isBookmarked ? 'fill-current' : ''}`} />
-            <span>{isBookmarked ? 'Відстежується' : 'Відстежувати'}</span>
-          </button>
+          {/* Кнопка відстеження опитування (лише для зареєстрованих користувачів) */}
+          {isAuthenticated && (
+            <button
+              type="button"
+              onClick={handleToggleBookmark}
+              disabled={bookmarkLoading}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-medium transition cursor-pointer disabled:opacity-50 ${
+                isBookmarked
+                  ? 'bg-accent/15 border-accent text-accent'
+                  : 'bg-app border-line text-muted hover:text-main hover:border-accent'
+              }`}
+            >
+              <Bookmark className={`w-3.5 h-3.5 ${isBookmarked ? 'fill-current' : ''}`} />
+              <span>{isBookmarked ? 'Відстежується' : 'Відстежувати'}</span>
+            </button>
+          )}
         </div>
 
         {loading ? (
@@ -448,24 +457,37 @@ export function SurveyAnalysisPage() {
           <span>Коментарі ({comments.length})</span>
         </div>
 
-        {/* Форма створення нового коментаря */}
-        <form onSubmit={handleAddComment} className="flex gap-2">
-          <input
-            type="text"
-            value={newCommentText}
-            onChange={(e) => setNewCommentText(e.target.value)}
-            placeholder="Напишіть коментар до опитування..."
-            className="flex-1 px-4 py-2.5 rounded-xl bg-app border border-line text-sm text-main placeholder:text-muted focus:outline-none focus:border-accent transition"
-          />
-          <button
-            type="submit"
-            disabled={!newCommentText.trim() || submittingComment}
-            className="px-4 py-2.5 rounded-xl bg-accent hover:bg-accent-hover text-accent-text font-medium text-sm inline-flex items-center gap-1.5 transition cursor-pointer disabled:opacity-50"
-          >
-            <Send className="w-4 h-4" />
-            <span className="hidden sm:inline">Надіслати</span>
-          </button>
-        </form>
+        {/* Форма створення коментаря (лише для зареєстрованих користувачів) */}
+        {isAuthenticated ? (
+          <form onSubmit={handleAddComment} className="flex gap-2">
+            <input
+              type="text"
+              value={newCommentText}
+              onChange={(e) => setNewCommentText(e.target.value)}
+              placeholder="Напишіть коментар до опитування..."
+              className="flex-1 px-4 py-2.5 rounded-xl bg-app border border-line text-sm text-main placeholder:text-muted focus:outline-none focus:border-accent transition"
+            />
+            <button
+              type="submit"
+              disabled={!newCommentText.trim() || submittingComment}
+              className="px-4 py-2.5 rounded-xl bg-accent hover:bg-accent-hover text-accent-text font-medium text-sm inline-flex items-center gap-1.5 transition cursor-pointer disabled:opacity-50"
+            >
+              <Send className="w-4 h-4" />
+              <span className="hidden sm:inline">Надіслати</span>
+            </button>
+          </form>
+        ) : (
+          <div className="p-3.5 rounded-xl bg-app border border-line flex flex-wrap items-center justify-between gap-2 text-xs sm:text-sm text-muted">
+            <span>Лише зареєстровані користувачі можуть залишати коментарі.</span>
+            <Link
+              to="/auth?mode=login"
+              className="inline-flex items-center gap-1.5 text-accent hover:underline font-medium"
+            >
+              <LogIn className="w-3.5 h-3.5" />
+              <span>Увійти</span>
+            </Link>
+          </div>
+        )}
 
         {/* Список коментарів */}
         {commentsLoading ? (
@@ -475,7 +497,7 @@ export function SurveyAnalysisPage() {
           </div>
         ) : comments.length === 0 ? (
           <p className="text-center text-sm text-muted py-4">
-            Поки що немає коментарів. Будьте першим!
+            Поки що немає коментарів.{isAuthenticated ? ' Будьте першим!' : ''}
           </p>
         ) : (
           <div className="space-y-4">
@@ -495,32 +517,34 @@ export function SurveyAnalysisPage() {
                     </span>
                   </div>
 
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setReplyingToId(
-                          replyingToId === comment.commentId ? null : comment.commentId
-                        );
-                        setReplyText('');
-                      }}
-                      className="text-xs text-muted hover:text-accent inline-flex items-center gap-1 transition cursor-pointer"
-                    >
-                      <Reply className="w-3.5 h-3.5" />
-                      <span>Відповісти</span>
-                    </button>
-
-                    {isAdmin && (
+                  {isAuthenticated && (
+                    <div className="flex items-center gap-2">
                       <button
                         type="button"
-                        onClick={() => handleDeleteComment(comment.commentId)}
-                        title="Видалити коментар (Адмін)"
-                        className="text-rose-400 hover:text-rose-300 p-1 rounded-lg hover:bg-rose-950/50 transition cursor-pointer"
+                        onClick={() => {
+                          setReplyingToId(
+                            replyingToId === comment.commentId ? null : comment.commentId
+                          );
+                          setReplyText('');
+                        }}
+                        className="text-xs text-muted hover:text-accent inline-flex items-center gap-1 transition cursor-pointer"
                       >
-                        <Trash2 className="w-3.5 h-3.5" />
+                        <Reply className="w-3.5 h-3.5" />
+                        <span>Відповісти</span>
                       </button>
-                    )}
-                  </div>
+
+                      {isAdmin && (
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteComment(comment.commentId)}
+                          title="Видалити коментар (Адмін)"
+                          className="text-rose-400 hover:text-rose-300 p-1 rounded-lg hover:bg-rose-950/50 transition cursor-pointer"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
+                  )}
                 </div>
 
                 {/* Текст коментаря */}
@@ -528,8 +552,8 @@ export function SurveyAnalysisPage() {
                   {comment.text}
                 </p>
 
-                {/* Форма додавання відповіді */}
-                {replyingToId === comment.commentId && (
+                {/* Форма додавання відповіді (лише для зареєстрованих) */}
+                {isAuthenticated && replyingToId === comment.commentId && (
                   <div className="pt-1 flex gap-2">
                     <input
                       type="text"
