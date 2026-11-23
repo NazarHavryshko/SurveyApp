@@ -46,11 +46,14 @@
             DECLARE
                 v_current_answers INT;
             BEGIN
+                -- Збільшуємо лічильник відповідей та оновлюємо час останньої активності
                 UPDATE users
-                SET answers_count = answers_count + 1
+                SET answers_count = answers_count + 1,
+                    last_active_at = NOW()
                 WHERE user_id = NEW.user_id
                 RETURNING answers_count INTO v_current_answers;
 
+                -- Якщо набралося 10 або більше відповідей — нараховуємо токени та залишок переносимо
                 IF v_current_answers >= 10 THEN
                     UPDATE users
                     SET available_question_tokens = available_question_tokens + (v_current_answers / 10),

@@ -1,0 +1,174 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<ClassDiagram MajorVersion="1" MinorVersion="1">
+  <Class Name="MySurveyApp.SqlService.Controllers.DictionariesController">
+    <Position X="8.25" Y="7.75" Width="1.75" />
+    <TypeIdentifier>
+      <HashCode>AAAQAAAAAAAABAAAAgAAAggAAAAAAgAAAAAAEAAAAAA=</HashCode>
+      <FileName>Controllers\DictionariesController.cs</FileName>
+    </TypeIdentifier>
+    <ShowAsAssociation>
+      <Field Name="_context" />
+    </ShowAsAssociation>
+  </Class>
+  <Class Name="MySurveyApp.SqlService.Controllers.InternalAnalyticsController">
+    <Position X="8" Y="3.25" Width="2.25" />
+    <TypeIdentifier>
+      <HashCode>AAAAAAAAAAAABAAAAAEAAAAAAAAAAAAAAAEAAAAAAAA=</HashCode>
+      <FileName>Controllers\InternalAnalyticsController.cs</FileName>
+    </TypeIdentifier>
+    <ShowAsAssociation>
+      <Field Name="_context" />
+    </ShowAsAssociation>
+  </Class>
+  <Class Name="MySurveyApp.SqlService.Controllers.SurveysController">
+    <Position X="5.5" Y="3.25" Width="1.5" />
+    <TypeIdentifier>
+      <HashCode>AAAAAAAAAAAABABAAAAAAAEAAIKAAgIAAAAAAIIAAAE=</HashCode>
+      <FileName>Controllers\SurveysController.cs</FileName>
+    </TypeIdentifier>
+    <ShowAsAssociation>
+      <Field Name="_context" />
+    </ShowAsAssociation>
+  </Class>
+  <Class Name="MySurveyApp.SqlService.Controllers.UsersController">
+    <Position X="5.5" Y="7" Width="1.5" />
+    <TypeIdentifier>
+      <HashCode>AAAAABAAAAAEhAgAAAACAAAAAAIBAAAAAAAQAAAAAAE=</HashCode>
+      <FileName>Controllers\UsersController.cs</FileName>
+    </TypeIdentifier>
+    <ShowAsAssociation>
+      <Field Name="_context" />
+    </ShowAsAssociation>
+  </Class>
+  <Class Name="MySurveyApp.SqlService.Models.Hobby">
+    <Position X="17.5" Y="6" Width="1.5" />
+    <TypeIdentifier>
+      <HashCode>AAAAAAAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAQAA=</HashCode>
+      <FileName>Models\Hobby.cs</FileName>
+    </TypeIdentifier>
+  </Class>
+  <Class Name="MySurveyApp.SqlService.Models.Occupation">
+    <Position X="15.25" Y="7.5" Width="1.5" />
+    <TypeIdentifier>
+      <HashCode>ABAAAAAgEAAAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAA=</HashCode>
+      <FileName>Models\Occupation.cs</FileName>
+    </TypeIdentifier>
+    <ShowAsAssociation>
+      <Property Name="OccupationDomain" />
+    </ShowAsAssociation>
+  </Class>
+  <Class Name="MySurveyApp.SqlService.Models.OccupationDomain">
+    <Position X="15.25" Y="9.25" Width="1.5" />
+    <TypeIdentifier>
+      <HashCode>ABAAAAAAAAAAAAAAAAAAAAAIAAAAAAAAAAAAAAAAAAA=</HashCode>
+      <FileName>Models\OccupationDomain.cs</FileName>
+    </TypeIdentifier>
+  </Class>
+  <Class Name="MySurveyApp.SqlService.Models.Region">
+    <Position X="12.75" Y="1.25" Width="1.5" />
+    <TypeIdentifier>
+      <HashCode>AAAEAAAAAAgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=</HashCode>
+      <FileName>Models\Region.cs</FileName>
+    </TypeIdentifier>
+  </Class>
+  <Class Name="MySurveyApp.SqlService.Models.Survey">
+    <Position X="12.75" Y="3.5" Width="1.5" />
+    <TypeIdentifier>
+      <HashCode>AAAAAAAEiAIAAAEEgCAAAAECAAAAAAAAABAAQQAAAgA=</HashCode>
+      <FileName>Models\Survey.cs</FileName>
+    </TypeIdentifier>
+    <ShowAsAssociation>
+      <Property Name="Author" />
+      <Property Name="Region" />
+      <Property Name="SurveyTopic" />
+    </ShowAsAssociation>
+    <ShowAsCollectionAssociation>
+      <Property Name="SurveyOptions" />
+    </ShowAsCollectionAssociation>
+  </Class>
+  <Class Name="MySurveyApp.SqlService.Models.SurveyBookmark">
+    <Position X="13.5" Y="9.25" Width="1.5" />
+    <TypeIdentifier>
+      <HashCode>AAABAAAAAAAAAAAAAAAAAAgAAAAAAAAAAACAQAAAAAA=</HashCode>
+      <FileName>Models\SurveyBookmark.cs</FileName>
+    </TypeIdentifier>
+    <ShowAsAssociation>
+      <Property Name="User" />
+      <Property Name="Survey" />
+    </ShowAsAssociation>
+  </Class>
+  <Class Name="MySurveyApp.SqlService.Models.SurveyDomain">
+    <Position X="10.5" Y="1.25" Width="1.5" />
+    <TypeIdentifier>
+      <HashCode>ABAAAAAAAAAAAAAAAAAAAAAIAAAAAAAAAAAAAAAAAAA=</HashCode>
+      <FileName>Models\SurveyDomain.cs</FileName>
+    </TypeIdentifier>
+  </Class>
+  <Class Name="MySurveyApp.SqlService.Models.SurveyInteraction">
+    <Position X="11.75" Y="9.25" Width="1.5" />
+    <AssociationLine Name="User" Type="MySurveyApp.SqlService.Models.User" ManuallyRouted="true">
+      <Path>
+        <Point X="12.469" Y="9.25" />
+        <Point X="12.469" Y="7.107" />
+        <Point X="12.917" Y="7.107" Type="JumpStart" />
+        <Point X="13.083" Y="7.107" Type="JumpEnd" />
+        <Point X="13.792" Y="7.107" Type="JumpStart" />
+        <Point X="13.958" Y="7.107" Type="JumpEnd" />
+        <Point X="14.5" Y="7.107" />
+        <Point X="14.5" Y="5.793" />
+        <Point X="15.25" Y="5.793" />
+      </Path>
+    </AssociationLine>
+    <TypeIdentifier>
+      <HashCode>AAABAAAAAAAAAAAAAAAAAAgAAAAAAAAAAACAQAAAAAA=</HashCode>
+      <FileName>Models\SurveyInteraction.cs</FileName>
+    </TypeIdentifier>
+    <ShowAsAssociation>
+      <Property Name="Survey" />
+      <Property Name="User" />
+    </ShowAsAssociation>
+  </Class>
+  <Class Name="MySurveyApp.SqlService.Models.SurveyOption">
+    <Position X="10.5" Y="6" Width="1.5" />
+    <Members>
+      <Property Name="Survey" Hidden="true" />
+    </Members>
+    <TypeIdentifier>
+      <HashCode>AAAAAAAAAAAAAAAAAQAAQAAAAAAAAAAAAACAQAAAAAA=</HashCode>
+      <FileName>Models\SurveyOption.cs</FileName>
+    </TypeIdentifier>
+  </Class>
+  <Class Name="MySurveyApp.SqlService.Models.SurveyTopic">
+    <Position X="10.5" Y="3.25" Width="1.5" />
+    <TypeIdentifier>
+      <HashCode>ABAAAAAAAAAAAAAAAAAAAAACAAAAAAAAAAAAABAACAA=</HashCode>
+      <FileName>Models\SurveyTopic.cs</FileName>
+    </TypeIdentifier>
+    <ShowAsAssociation>
+      <Property Name="SurveyDomain" />
+    </ShowAsAssociation>
+  </Class>
+  <Class Name="MySurveyApp.SqlService.Models.User">
+    <Position X="15.25" Y="3.5" Width="1.5" />
+    <TypeIdentifier>
+      <HashCode>ACCFABCggAAAAACAAAIAAAgAAAAACAQAAQAAAAAAQAA=</HashCode>
+      <FileName>Models\User.cs</FileName>
+    </TypeIdentifier>
+    <ShowAsAssociation>
+      <Property Name="Region" />
+      <Property Name="Hobby" />
+      <Property Name="Occupation" />
+    </ShowAsAssociation>
+  </Class>
+  <Class Name="MySurveyApp.SqlService.Data.SurveyDbContext">
+    <Position X="8.25" Y="5.5" Width="1.5" />
+    <Compartments>
+      <Compartment Name="Properties" Collapsed="true" />
+    </Compartments>
+    <TypeIdentifier>
+      <HashCode>AAgAASAAIIKCAAAEAAAAAAAAEAAAAAAAAAAAABAACAA=</HashCode>
+      <FileName>Data\SurveyDbContext.cs</FileName>
+    </TypeIdentifier>
+  </Class>
+  <Font Name="Segoe UI" Size="9" />
+</ClassDiagram>

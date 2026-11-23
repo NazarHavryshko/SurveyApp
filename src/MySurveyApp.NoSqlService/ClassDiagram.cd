@@ -1,0 +1,79 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<ClassDiagram MajorVersion="1" MinorVersion="1">
+  <Class Name="MySurveyApp.NoSqlService.Controllers.AnalyticsController">
+    <Position X="5.25" Y="6.25" Width="1.5" />
+    <TypeIdentifier>
+      <HashCode>AAAAAAAAAAABAAAAAAAAAoAAAAAAAAAAAAAAAAAIAAA=</HashCode>
+      <FileName>Controllers\AnalyticsController.cs</FileName>
+    </TypeIdentifier>
+  </Class>
+  <Class Name="MySurveyApp.NoSqlService.Controllers.CommentsController">
+    <Position X="2.25" Y="6.25" Width="1.5" />
+    <TypeIdentifier>
+      <HashCode>ABAAAAAIAAAAAAABAAAAAAAAAAAAAAAAAAgAAAAAAAA=</HashCode>
+      <FileName>Controllers\CommentsController.cs</FileName>
+    </TypeIdentifier>
+  </Class>
+  <Class Name="MySurveyApp.NoSqlService.Controllers.ResponsesController">
+    <Position X="2.25" Y="4" Width="1.75" />
+    <TypeIdentifier>
+      <HashCode>AAAAAAAAAAAAAAAAAAAACgAAAAAAAAAAAAAAAQAAAAA=</HashCode>
+      <FileName>Controllers\ResponsesController.cs</FileName>
+    </TypeIdentifier>
+    <ShowAsAssociation>
+      <Field Name="_sqlClient" />
+    </ShowAsAssociation>
+  </Class>
+  <Class Name="MySurveyApp.NoSqlService.Models.SurveyResponseDocument">
+    <Position X="7.75" Y="6" Width="2.25" />
+    <TypeIdentifier>
+      <HashCode>AAACAAAAyAAAAAAEACAAAAASAAAAAAAAQAAAQBAAAAA=</HashCode>
+      <FileName>Models\SurveyResponseDocument.cs</FileName>
+    </TypeIdentifier>
+    <ShowAsAssociation>
+      <Property Name="UserSnapshot" />
+    </ShowAsAssociation>
+  </Class>
+  <Class Name="MySurveyApp.NoSqlService.Models.UserSnapshot">
+    <Position X="8" Y="3.5" Width="1.5" />
+    <TypeIdentifier>
+      <HashCode>AAAAAACAEAgAAgCAAAAAAAAAAAAQAAAAAAAAAAAAAAA=</HashCode>
+      <FileName>Models\UserSnapshot.cs</FileName>
+    </TypeIdentifier>
+  </Class>
+  <Class Name="MySurveyApp.NoSqlService.Models.ReplyItem">
+    <Position X="2.25" Y="1.75" Width="1.5" />
+    <TypeIdentifier>
+      <HashCode>AAABAAAAAAAAAAAAACAAABAAAAAAAAAAAAAACAAAAAA=</HashCode>
+      <FileName>Models\SurveyCommentDocument.cs</FileName>
+    </TypeIdentifier>
+  </Class>
+  <Class Name="MySurveyApp.NoSqlService.Models.CommentItem">
+    <Position X="5.25" Y="1.75" Width="1.5" />
+    <TypeIdentifier>
+      <HashCode>AAABAAAAAAAAAQAAACAAAAAAAAAAAAAgAAAACAAIAAA=</HashCode>
+      <FileName>Models\SurveyCommentDocument.cs</FileName>
+    </TypeIdentifier>
+    <ShowAsCollectionAssociation>
+      <Property Name="Replies" />
+    </ShowAsCollectionAssociation>
+  </Class>
+  <Class Name="MySurveyApp.NoSqlService.Models.SurveyCommentDocument">
+    <Position X="8" Y="1.75" Width="2.25" />
+    <TypeIdentifier>
+      <HashCode>AAACBAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAAAIAA=</HashCode>
+      <FileName>Models\SurveyCommentDocument.cs</FileName>
+    </TypeIdentifier>
+    <ShowAsCollectionAssociation>
+      <Property Name="Comments" />
+    </ShowAsCollectionAssociation>
+  </Class>
+  <Class Name="MySurveyApp.NoSqlService.Services.SqlEnrichmentClient">
+    <Position X="5.25" Y="4" Width="1.75" />
+    <TypeIdentifier>
+      <HashCode>AAAAAAAAoAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAA=</HashCode>
+      <FileName>Services\SqlEnrichmentClient.cs</FileName>
+    </TypeIdentifier>
+  </Class>
+  <Font Name="Segoe UI" Size="9" />
+</ClassDiagram>

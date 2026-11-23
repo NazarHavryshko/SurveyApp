@@ -13,9 +13,10 @@ public class CommentsController : ControllerBase
 {
     private readonly IMongoCollection<SurveyCommentDocument> _commentsCollection;
 
-    public CommentsController(IMongoCollection<SurveyCommentDocument> commentsCollection)
+    public CommentsController(IMongoCollection<SurveyCommentDocument> mongoDatabase)
     {
-        _commentsCollection = commentsCollection;
+        // Явно вказуємо назву колекції у стилі snake_case: survey_comments
+        _commentsCollection = mongoDatabase.Database.GetCollection<SurveyCommentDocument>("survey_comments");
     }
 
     /// <summary>
@@ -180,5 +181,4 @@ public class CommentsController : ControllerBase
 
         return Ok(new { message = "Коментар успішно видалено." });
     }
-
 }

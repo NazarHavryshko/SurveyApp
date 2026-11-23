@@ -24,6 +24,8 @@ import {
   User,
   Radio,
   Ban,
+  MessageSquare,
+  CornerDownRight,
 } from 'lucide-react';
 import { apiClient, JWT_TOKEN_KEY } from '../api/apiClient';
 import { SearchableSelect } from '../components/SearchableSelect';
@@ -65,6 +67,29 @@ interface EditFormState {
   status: ModerationStatusOption;
   rejectionReason: string;
   options: string[];
+}
+
+interface CommentReply {
+  replyId: number;
+  createdAt: string;
+  text: string;
+  nickname: string;
+}
+
+interface SurveyComment {
+  commentId: number;
+  createdAt: string;
+  text: string;
+  nickname: string;
+  nextReplyId: number;
+  replies: CommentReply[];
+}
+
+interface CommentsApiResponse {
+  id?: string;
+  surveyId: number;
+  nextCommentId: number;
+  comments: SurveyComment[];
 }
 
 function getRoleFromJwt(): string {
@@ -262,6 +287,12 @@ export function ModerationPage() {
   const [expandedSurveyId, setExpandedSurveyId] = useState<number | null>(null);
   const [editForm, setEditForm] = useState<EditFormState | null>(null);
 
+  // Коментарі для модерації
+  const [commentsBySurvey, setCommentsBySurvey] = useState<Record<number, SurveyComment[]>>({});
+  const [loadingCommentsId, setLoadingCommentsId] = useState<number | null>(null);
+  const [deletingCommentKey, setDeletingCommentKey] = useState<string | null>(null);
+  const [commentError, setCommentError] = useState<string>('');
+
   const [saving, setSaving] = useState<boolean>(false);
   const [archivingId, setArchivingId] = useState<number | null>(null);
   const [pageError, setPageError] = useState<string>('');
@@ -365,6 +396,7 @@ export function ModerationPage() {
     setExpandedSurveyId(null);
     setEditForm(null);
     setFormError('');
+    setCommentError('');
     setBannerSuccess('');
   };
 
@@ -378,9 +410,71 @@ export function ModerationPage() {
     return mapped;
   };
 
+  const fetchSurveyComments = async (surveyId: number) => {
+    setLoadingCommentsId(surveyId);
+    setCommentError('');
+    try {
+      const res = await apiClient.get<CommentsApiResponse>(
+        `/internal/surveys/${surveyId}/comments`
+      );
+      setCommentsBySurvey((prev) => ({
+        ...prev,
+        [surveyId]: Array.isArray(res.data?.comments) ? res.data.comments : [],
+      }));
+    } catch (err: any) {
+      const msg = err.response?.data?.message || err.message;
+      setCommentError(`Не вдалося завантажити коментарі: ${msg}`);
+      setCommentsBySurvey((prev) => ({ ...prev, [surveyId]: [] }));
+    } finally {
+      setLoadingCommentsId((prev) => (prev === surveyId ? null : prev));
+    }
+  };
+
+  const handleDeleteComment = async (
+    surveyId: number,
+    commentId: number,
+    replyId?: number
+  ) => {
+    const actionKey =
+      replyId !== undefined
+        ? `${surveyId}-${commentId}-${replyId}`
+        : `${surveyId}-${commentId}`;
+
+    if (deletingCommentKey) return;
+
+    const confirmText =
+      replyId !== undefined
+        ? 'Ви впевнені, що хочете видалити цю відповідь на коментар?'
+        : 'Ви впевнені, що хочете видалити цей коментар разом з усіма відповідями?';
+
+    if (!window.confirm(confirmText)) return;
+
+    setDeletingCommentKey(actionKey);
+    setCommentError('');
+
+    try {
+      await apiClient.delete(`/internal/surveys/${surveyId}/comments/${commentId}`, {
+        params: replyId !== undefined ? { replyId } : undefined,
+      });
+
+      await fetchSurveyComments(surveyId);
+    } catch (err: any) {
+      const status = err.response?.status;
+      const msg =
+        err.response?.data?.message ||
+        err.response?.data?.detail ||
+        err.response?.data?.title ||
+        err.message;
+      setCommentError(`Не вдалося видалити коментар (${status || 'мережа'}): ${msg}`);
+    } finally {
+      setDeletingCommentKey(null);
+    }
+  };
+
   // Відкриття/закриття меню редагування конкретного опитування при кліку
   const handleSelectSurvey = async (survey: ModerationSurveyItem) => {
     setFormError('');
+    setCommentError('');
     setBannerSuccess('');
 
     if (expandedSurveyId === survey.surveyId) {
@@ -412,6 +506,9 @@ export function ModerationPage() {
       rejectionReason: survey.rejectionReason ?? '',
       options: initialOptions,
     });
+
+    // Паралельно завантажуємо коментарі до опитування
+    fetchSurveyComments(survey.surveyId);
 
     if (survey.topicId > 0 && surveyDomains.length > 0) {
       setLoadingEditMeta(true);
@@ -693,7 +790,7 @@ export function ModerationPage() {
             <p className="text-xs sm:text-sm text-muted">
               {activeTab === 'pending'
                 ? 'Перевіряйте нові опитування, редагуйте поля, схвалюйте або відхиляйте із зазначенням причини.'
-                : 'Керуйте опублікованими опитуваннями або примусово переводьте їх в архів.'}
+                : 'Керуйте опублікованими опитуваннями, модеруйте коментарі або примусово переводьте в архів.'}
             </p>
           </div>
 
@@ -806,6 +903,9 @@ export function ModerationPage() {
               editForm?.surveyType === 'SingleChoice' ||
               editForm?.surveyType === 'MultipleChoice';
 
+            const surveyComments = commentsBySurvey[survey.surveyId] ?? [];
+            const isLoadingComments = loadingCommentsId === survey.surveyId;
+
             return (
               <article
                 key={survey.surveyId}
@@ -887,347 +987,474 @@ export function ModerationPage() {
                   </div>
                 </div>
 
-                {/* Меню редагування опитування при натисканні */}
+                {/* Меню редагування опитування та модерації коментарів при натисканні */}
                 {isExpanded && editForm && (
-                  <form
-                    onSubmit={(e) => handleSaveModeration(e, survey.surveyId)}
-                    className="px-5 sm:px-6 pb-6 pt-5 border-t border-line bg-app/30 space-y-5"
-                  >
-                    <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted">
-                      <span>ID опитування: #{survey.surveyId}</span>
-                      {survey.createdAt && (
-                        <span className="inline-flex items-center gap-1.5">
-                          <Calendar className="w-3.5 h-3.5" />
-                          <span>Створено: {formatDisplayDate(survey.createdAt)}</span>
-                        </span>
+                  <div className="px-5 sm:px-6 pb-6 pt-5 border-t border-line bg-app/30 space-y-6">
+                    <form
+                      onSubmit={(e) => handleSaveModeration(e, survey.surveyId)}
+                      className="space-y-5"
+                    >
+                      <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted">
+                        <span>ID опитування: #{survey.surveyId}</span>
+                        {survey.createdAt && (
+                          <span className="inline-flex items-center gap-1.5">
+                            <Calendar className="w-3.5 h-3.5" />
+                            <span>Створено: {formatDisplayDate(survey.createdAt)}</span>
+                          </span>
+                        )}
+                      </div>
+
+                      {formError && (
+                        <div className="p-3.5 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-500 text-xs sm:text-sm font-medium flex items-start gap-2.5">
+                          <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                          <span>{formError}</span>
+                        </div>
                       )}
-                    </div>
 
-                    {formError && (
-                      <div className="p-3.5 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-500 text-xs sm:text-sm font-medium flex items-start gap-2.5">
-                        <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
-                        <span>{formError}</span>
-                      </div>
-                    )}
-
-                    {/* Текст опитування */}
-                    <div className="space-y-1.5">
-                      <div className="flex items-center justify-between text-xs">
-                        <label className="font-medium text-muted">
-                          Текст опитування <span className="text-rose-500">*</span>
-                        </label>
-                        <span className="text-muted font-mono">
-                          {editForm.surveyText.length}/300
-                        </span>
-                      </div>
-                      <div className="relative">
-                        <HelpCircle className="w-4 h-4 text-muted absolute left-3.5 top-3.5 pointer-events-none" />
-                        <textarea
-                          required
-                          rows={3}
-                          minLength={5}
-                          maxLength={300}
-                          value={editForm.surveyText}
-                          onChange={(e) =>
-                            setEditForm({ ...editForm, surveyText: e.target.value })
-                          }
-                          className="w-full pl-10 pr-4 py-3 rounded-2xl bg-card border border-line text-main text-sm focus:border-accent outline-none transition resize-none"
-                        />
-                      </div>
-                    </div>
-
-                    {/* Тип опитування */}
-                    <div className="space-y-1.5">
-                      <label className="block text-xs font-medium text-muted">
-                        Тип опитування <span className="text-rose-500">*</span>
-                      </label>
-                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                        {(
-                          [
-                            { id: 'SingleChoice', label: 'Один варіант' },
-                            { id: 'MultipleChoice', label: 'Кілька варіантів' },
-                            { id: 'Numeric', label: 'Числова відповідь' },
-                          ] as const
-                        ).map((item) => {
-                          const active = editForm.surveyType === item.id;
-                          return (
-                            <button
-                              key={item.id}
-                              type="button"
-                              onClick={() =>
-                                setEditForm({ ...editForm, surveyType: item.id })
-                              }
-                              className={`py-2.5 px-3.5 rounded-xl border text-xs sm:text-sm font-semibold transition cursor-pointer ${
-                                active
-                                  ? 'bg-accent/15 border-accent text-accent'
-                                  : 'bg-card border-line text-main hover:border-accent/40'
-                              }`}
-                            >
-                              {item.label}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-
-                    {/* Галузь та Тема */}
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      {/* Текст опитування */}
                       <div className="space-y-1.5">
-                        <label className="block text-xs font-medium text-muted">
-                          Галузь опитування
-                        </label>
-                        <SearchableSelect
-                          options={surveyDomains}
-                          value={editForm.domainId}
-                          onChange={handleEditDomainChange}
-                          placeholder="Оберіть галузь..."
-                          icon={<FolderOpen className="w-4 h-4" />}
-                        />
-                      </div>
-
-                      <div className="space-y-1.5">
-                        <label className="block text-xs font-medium text-muted">
-                          Тема <span className="text-rose-500">*</span>
-                        </label>
-                        <SearchableSelect
-                          options={currentTopics}
-                          value={editForm.topicId}
-                          onChange={(val) =>
-                            setEditForm({ ...editForm, topicId: val })
-                          }
-                          disabled={!editForm.domainId || loadingEditMeta}
-                          placeholder={
-                            loadingEditMeta
-                              ? 'Завантаження тем...'
-                              : !editForm.domainId
-                              ? 'Спочатку оберіть галузь'
-                              : 'Оберіть тему...'
-                          }
-                          icon={<Tag className="w-4 h-4" />}
-                        />
-                      </div>
-                    </div>
-
-                    {/* Регіон та Дата завершення */}
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      <div className="space-y-1.5">
-                        <label className="block text-xs font-medium text-muted">
-                          Цільовий регіон
-                        </label>
-                        <SearchableSelect
-                          options={regions}
-                          value={editForm.regionTargetId}
-                          onChange={(val) =>
-                            setEditForm({ ...editForm, regionTargetId: val })
-                          }
-                          placeholder="Усі регіони України"
-                          icon={<MapPin className="w-4 h-4" />}
-                        />
-                      </div>
-
-                      <div className="space-y-1.5">
-                        <label className="block text-xs font-medium text-muted">
-                          Актуальне до <span className="text-rose-500">*</span>
-                        </label>
-                        <input
-                          type="datetime-local"
-                          required
-                          value={editForm.expiresAtLocal}
-                          onChange={(e) =>
-                            setEditForm({
-                              ...editForm,
-                              expiresAtLocal: e.target.value,
-                            })
-                          }
-                          className="w-full px-3.5 py-3 rounded-xl bg-card border border-line text-main text-sm focus:border-accent outline-none transition"
-                        />
-                      </div>
-                    </div>
-
-                    {/* Варіанти відповідей */}
-                    {isChoiceType ? (
-                      <div className="space-y-2.5">
-                        <div className="flex items-center justify-between">
-                          <label className="block text-xs font-medium text-muted">
-                            Варіанти відповідей <span className="text-rose-500">*</span>
-                          </label>
-                          {editForm.options.length < MAX_OPTIONS && (
-                            <button
-                              type="button"
-                              onClick={handleAddOption}
-                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-accent/10 hover:bg-accent/20 border border-accent/25 text-accent text-xs font-semibold transition cursor-pointer"
-                            >
-                              <Plus className="w-3.5 h-3.5" />
-                              <span>Додати варіант</span>
-                            </button>
-                          )}
-                        </div>
-
-                        <div className="space-y-2">
-                          {editForm.options.map((opt, idx) => (
-                            <div key={idx} className="flex items-center gap-2">
-                              <span className="w-6 text-center text-xs font-mono text-muted shrink-0">
-                                {idx + 1}.
-                              </span>
-                              <input
-                                type="text"
-                                required
-                                maxLength={150}
-                                value={opt}
-                                onChange={(e) => handleOptionChange(idx, e.target.value)}
-                                placeholder={`Варіант №${idx + 1}`}
-                                className="flex-1 px-3.5 py-2.5 rounded-xl bg-card border border-line text-main text-sm focus:border-accent outline-none transition"
-                              />
-                              {editForm.options.length > MIN_OPTIONS && (
-                                <button
-                                  type="button"
-                                  onClick={() => handleRemoveOption(idx)}
-                                  title="Видалити варіант"
-                                  className="p-2.5 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/25 text-rose-500 transition cursor-pointer shrink-0"
-                                >
-                                  <Trash2 className="w-4 h-4" />
-                                </button>
-                              )}
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="p-3.5 rounded-xl bg-card border border-line flex items-center gap-2.5 text-xs text-muted">
-                        <Hash className="w-4 h-4 text-accent shrink-0" />
-                        <span>
-                          Числовий тип опитування не містить фіксованих варіантів відповіді.
-                        </span>
-                      </div>
-                    )}
-
-                    {/* Рішення модератора (відповідно до enum SurveyStatus) */}
-                    <div className="space-y-2 pt-1">
-                      <label className="block text-xs font-medium text-muted">
-                        Рішення модератора (статус) <span className="text-rose-500">*</span>
-                      </label>
-                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                        <button
-                          type="button"
-                          onClick={() => setEditForm({ ...editForm, status: 'Active' })}
-                          className={`py-2.5 px-3 rounded-xl border text-xs font-semibold inline-flex items-center justify-center gap-1.5 transition cursor-pointer ${
-                            editForm.status === 'Active'
-                              ? 'bg-emerald-500/15 border-emerald-500 text-emerald-500'
-                              : 'bg-card border-line text-muted hover:text-main'
-                          }`}
-                        >
-                          <CheckCircle2 className="w-4 h-4 shrink-0" />
-                          <span>Схвалити</span>
-                        </button>
-
-                        <button
-                          type="button"
-                          onClick={() => setEditForm({ ...editForm, status: 'Rejected' })}
-                          className={`py-2.5 px-3 rounded-xl border text-xs font-semibold inline-flex items-center justify-center gap-1.5 transition cursor-pointer ${
-                            editForm.status === 'Rejected'
-                              ? 'bg-rose-500/15 border-rose-500 text-rose-500'
-                              : 'bg-card border-line text-muted hover:text-main'
-                          }`}
-                        >
-                          <Ban className="w-4 h-4 shrink-0" />
-                          <span>Відхилити</span>
-                        </button>
-
-                        <button
-                          type="button"
-                          onClick={() => setEditForm({ ...editForm, status: 'Pending' })}
-                          className={`py-2.5 px-3 rounded-xl border text-xs font-semibold inline-flex items-center justify-center gap-1.5 transition cursor-pointer ${
-                            editForm.status === 'Pending'
-                              ? 'bg-amber-500/15 border-amber-500 text-amber-500'
-                              : 'bg-card border-line text-muted hover:text-main'
-                          }`}
-                        >
-                          <Clock className="w-4 h-4 shrink-0" />
-                          <span>Pending</span>
-                        </button>
-
-                        <button
-                          type="button"
-                          onClick={() => setEditForm({ ...editForm, status: 'Archived' })}
-                          className={`py-2.5 px-3 rounded-xl border text-xs font-semibold inline-flex items-center justify-center gap-1.5 transition cursor-pointer ${
-                            editForm.status === 'Archived'
-                              ? 'bg-accent/15 border-accent text-accent'
-                              : 'bg-card border-line text-muted hover:text-main'
-                          }`}
-                        >
-                          <Archive className="w-4 h-4 shrink-0" />
-                          <span>В архів</span>
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* Обов'язкове поле причини відхилення при статусі Rejected (FR 6.2) */}
-                    {editForm.status === 'Rejected' && (
-                      <div className="p-4 rounded-2xl bg-rose-500/5 border border-rose-500/30 space-y-2">
                         <div className="flex items-center justify-between text-xs">
-                          <label className="font-semibold text-rose-500 flex items-center gap-1.5">
-                            <XCircle className="w-4 h-4" />
-                            <span>
-                              Причина відхилення опитування <span className="text-rose-500">*</span>
-                            </span>
+                          <label className="font-medium text-muted">
+                            Текст опитування <span className="text-rose-500">*</span>
                           </label>
                           <span className="text-muted font-mono">
-                            {editForm.rejectionReason.length}/500
+                            {editForm.surveyText.length}/300
                           </span>
                         </div>
-                        <textarea
-                          required
-                          rows={2}
-                          minLength={3}
-                          maxLength={500}
-                          value={editForm.rejectionReason}
-                          onChange={(e) =>
-                            setEditForm({
-                              ...editForm,
-                              rejectionReason: e.target.value,
-                            })
-                          }
-                          placeholder="Опишіть причину відхилення (наприклад: нецензурна лексика, дублювання або некоректні варіанти відповіді)..."
-                          className="w-full px-3.5 py-2.5 rounded-xl bg-card border border-rose-500/40 text-main text-sm placeholder:text-muted focus:border-rose-500 outline-none transition resize-none"
-                          autoFocus
-                        />
+                        <div className="relative">
+                          <HelpCircle className="w-4 h-4 text-muted absolute left-3.5 top-3.5 pointer-events-none" />
+                          <textarea
+                            required
+                            rows={3}
+                            minLength={5}
+                            maxLength={300}
+                            value={editForm.surveyText}
+                            onChange={(e) =>
+                              setEditForm({ ...editForm, surveyText: e.target.value })
+                            }
+                            className="w-full pl-10 pr-4 py-3 rounded-2xl bg-card border border-line text-main text-sm focus:border-accent outline-none transition resize-none"
+                          />
+                        </div>
                       </div>
-                    )}
 
-                    {/* Кнопки збереження / скасування */}
-                    <div className="flex flex-wrap justify-end gap-3 pt-3 border-t border-line">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setExpandedSurveyId(null);
-                          setEditForm(null);
-                          setFormError('');
-                        }}
-                        className="px-4 py-2.5 rounded-xl bg-card border border-line text-muted hover:text-main text-sm font-medium transition cursor-pointer"
-                      >
-                        Згорнути
-                      </button>
+                      {/* Тип опитування */}
+                      <div className="space-y-1.5">
+                        <label className="block text-xs font-medium text-muted">
+                          Тип опитування <span className="text-rose-500">*</span>
+                        </label>
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                          {(
+                            [
+                              { id: 'SingleChoice', label: 'Один варіант' },
+                              { id: 'MultipleChoice', label: 'Кілька варіантів' },
+                              { id: 'Numeric', label: 'Числова відповідь' },
+                            ] as const
+                          ).map((item) => {
+                            const active = editForm.surveyType === item.id;
+                            return (
+                              <button
+                                key={item.id}
+                                type="button"
+                                onClick={() =>
+                                  setEditForm({ ...editForm, surveyType: item.id })
+                                }
+                                className={`py-2.5 px-3.5 rounded-xl border text-xs sm:text-sm font-semibold transition cursor-pointer ${
+                                  active
+                                    ? 'bg-accent/15 border-accent text-accent'
+                                    : 'bg-card border-line text-main hover:border-accent/40'
+                                }`}
+                              >
+                                {item.label}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
 
-                      <button
-                        type="submit"
-                        disabled={saving}
-                        className={`px-5 py-2.5 rounded-xl disabled:opacity-50 text-sm font-semibold inline-flex items-center gap-2 transition shadow-sm cursor-pointer ${
-                          editForm.status === 'Rejected'
-                            ? 'bg-rose-600 hover:bg-rose-500 text-white'
-                            : 'bg-accent hover:bg-accent-hover text-accent-text'
-                        }`}
-                      >
-                        <Save className="w-4 h-4" />
-                        <span>
-                          {saving
-                            ? 'Збереження...'
-                            : editForm.status === 'Rejected'
-                            ? 'Відхилити опитування'
-                            : 'Зберегти зміни'}
-                        </span>
-                      </button>
+                      {/* Галузь та Тема */}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div className="space-y-1.5">
+                          <label className="block text-xs font-medium text-muted">
+                            Галузь опитування
+                          </label>
+                          <SearchableSelect
+                            options={surveyDomains}
+                            value={editForm.domainId}
+                            onChange={handleEditDomainChange}
+                            placeholder="Оберіть галузь..."
+                            icon={<FolderOpen className="w-4 h-4" />}
+                          />
+                        </div>
+
+                        <div className="space-y-1.5">
+                          <label className="block text-xs font-medium text-muted">
+                            Тема <span className="text-rose-500">*</span>
+                          </label>
+                          <SearchableSelect
+                            options={currentTopics}
+                            value={editForm.topicId}
+                            onChange={(val) =>
+                              setEditForm({ ...editForm, topicId: val })
+                            }
+                            disabled={!editForm.domainId || loadingEditMeta}
+                            placeholder={
+                              loadingEditMeta
+                                ? 'Завантаження тем...'
+                                : !editForm.domainId
+                                ? 'Спочатку оберіть галузь'
+                                : 'Оберіть тему...'
+                            }
+                            icon={<Tag className="w-4 h-4" />}
+                          />
+                        </div>
+                      </div>
+
+                      {/* Регіон та Дата завершення */}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div className="space-y-1.5">
+                          <label className="block text-xs font-medium text-muted">
+                            Цільовий регіон
+                          </label>
+                          <SearchableSelect
+                            options={regions}
+                            value={editForm.regionTargetId}
+                            onChange={(val) =>
+                              setEditForm({ ...editForm, regionTargetId: val })
+                            }
+                            placeholder="Усі регіони України"
+                            icon={<MapPin className="w-4 h-4" />}
+                          />
+                        </div>
+
+                        <div className="space-y-1.5">
+                          <label className="block text-xs font-medium text-muted">
+                            Актуальне до <span className="text-rose-500">*</span>
+                          </label>
+                          <input
+                            type="datetime-local"
+                            required
+                            value={editForm.expiresAtLocal}
+                            onChange={(e) =>
+                              setEditForm({
+                                ...editForm,
+                                expiresAtLocal: e.target.value,
+                              })
+                            }
+                            className="w-full px-3.5 py-3 rounded-xl bg-card border border-line text-main text-sm focus:border-accent outline-none transition"
+                          />
+                        </div>
+                      </div>
+
+                      {/* Варіанти відповідей */}
+                      {isChoiceType ? (
+                        <div className="space-y-2.5">
+                          <div className="flex items-center justify-between">
+                            <label className="block text-xs font-medium text-muted">
+                              Варіанти відповідей <span className="text-rose-500">*</span>
+                            </label>
+                            {editForm.options.length < MAX_OPTIONS && (
+                              <button
+                                type="button"
+                                onClick={handleAddOption}
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-accent/10 hover:bg-accent/20 border border-accent/25 text-accent text-xs font-semibold transition cursor-pointer"
+                              >
+                                <Plus className="w-3.5 h-3.5" />
+                                <span>Додати варіант</span>
+                              </button>
+                            )}
+                          </div>
+
+                          <div className="space-y-2">
+                            {editForm.options.map((opt, idx) => (
+                              <div key={idx} className="flex items-center gap-2">
+                                <span className="w-6 text-center text-xs font-mono text-muted shrink-0">
+                                  {idx + 1}.
+                                </span>
+                                <input
+                                  type="text"
+                                  required
+                                  maxLength={150}
+                                  value={opt}
+                                  onChange={(e) => handleOptionChange(idx, e.target.value)}
+                                  placeholder={`Варіант №${idx + 1}`}
+                                  className="flex-1 px-3.5 py-2.5 rounded-xl bg-card border border-line text-main text-sm focus:border-accent outline-none transition"
+                                />
+                                {editForm.options.length > MIN_OPTIONS && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleRemoveOption(idx)}
+                                    title="Видалити варіант"
+                                    className="p-2.5 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/25 text-rose-500 transition cursor-pointer shrink-0"
+                                  >
+                                    <Trash2 className="w-4 h-4" />
+                                  </button>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="p-3.5 rounded-xl bg-card border border-line flex items-center gap-2.5 text-xs text-muted">
+                          <Hash className="w-4 h-4 text-accent shrink-0" />
+                          <span>
+                            Числовий тип опитування не містить фіксованих варіантів відповіді.
+                          </span>
+                        </div>
+                      )}
+
+                      {/* Рішення модератора (відповідно до enum SurveyStatus) */}
+                      <div className="space-y-2 pt-1">
+                        <label className="block text-xs font-medium text-muted">
+                          Рішення модератора (статус) <span className="text-rose-500">*</span>
+                        </label>
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setEditForm({ ...editForm, status: 'Active' })}
+                            className={`py-2.5 px-3 rounded-xl border text-xs font-semibold inline-flex items-center justify-center gap-1.5 transition cursor-pointer ${
+                              editForm.status === 'Active'
+                                ? 'bg-emerald-500/15 border-emerald-500 text-emerald-500'
+                                : 'bg-card border-line text-muted hover:text-main'
+                            }`}
+                          >
+                            <CheckCircle2 className="w-4 h-4 shrink-0" />
+                            <span>Схвалити</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => setEditForm({ ...editForm, status: 'Rejected' })}
+                            className={`py-2.5 px-3 rounded-xl border text-xs font-semibold inline-flex items-center justify-center gap-1.5 transition cursor-pointer ${
+                              editForm.status === 'Rejected'
+                                ? 'bg-rose-500/15 border-rose-500 text-rose-500'
+                                : 'bg-card border-line text-muted hover:text-main'
+                            }`}
+                          >
+                            <Ban className="w-4 h-4 shrink-0" />
+                            <span>Відхилити</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => setEditForm({ ...editForm, status: 'Pending' })}
+                            className={`py-2.5 px-3 rounded-xl border text-xs font-semibold inline-flex items-center justify-center gap-1.5 transition cursor-pointer ${
+                              editForm.status === 'Pending'
+                                ? 'bg-amber-500/15 border-amber-500 text-amber-500'
+                                : 'bg-card border-line text-muted hover:text-main'
+                            }`}
+                          >
+                            <Clock className="w-4 h-4 shrink-0" />
+                            <span>Pending</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => setEditForm({ ...editForm, status: 'Archived' })}
+                            className={`py-2.5 px-3 rounded-xl border text-xs font-semibold inline-flex items-center justify-center gap-1.5 transition cursor-pointer ${
+                              editForm.status === 'Archived'
+                                ? 'bg-accent/15 border-accent text-accent'
+                                : 'bg-card border-line text-muted hover:text-main'
+                            }`}
+                          >
+                            <Archive className="w-4 h-4 shrink-0" />
+                            <span>В архів</span>
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Обов'язкове поле причини відхилення при статусі Rejected (FR 6.2) */}
+                      {editForm.status === 'Rejected' && (
+                        <div className="p-4 rounded-2xl bg-rose-500/5 border border-rose-500/30 space-y-2">
+                          <div className="flex items-center justify-between text-xs">
+                            <label className="font-semibold text-rose-500 flex items-center gap-1.5">
+                              <XCircle className="w-4 h-4" />
+                              <span>
+                                Причина відхилення опитування <span className="text-rose-500">*</span>
+                              </span>
+                            </label>
+                            <span className="text-muted font-mono">
+                              {editForm.rejectionReason.length}/500
+                            </span>
+                          </div>
+                          <textarea
+                            required
+                            rows={2}
+                            minLength={3}
+                            maxLength={500}
+                            value={editForm.rejectionReason}
+                            onChange={(e) =>
+                              setEditForm({
+                                ...editForm,
+                                rejectionReason: e.target.value,
+                              })
+                            }
+                            placeholder="Опишіть причину відхилення (наприклад: нецензурна лексика, дублювання або некоректні варіанти відповіді)..."
+                            className="w-full px-3.5 py-2.5 rounded-xl bg-card border border-rose-500/40 text-main text-sm placeholder:text-muted focus:border-rose-500 outline-none transition resize-none"
+                            autoFocus
+                          />
+                        </div>
+                      )}
+
+                      {/* Кнопки збереження / скасування */}
+                      <div className="flex flex-wrap justify-end gap-3 pt-3 border-t border-line">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setExpandedSurveyId(null);
+                            setEditForm(null);
+                            setFormError('');
+                            setCommentError('');
+                          }}
+                          className="px-4 py-2.5 rounded-xl bg-card border border-line text-muted hover:text-main text-sm font-medium transition cursor-pointer"
+                        >
+                          Згорнути
+                        </button>
+
+                        <button
+                          type="submit"
+                          disabled={saving}
+                          className={`px-5 py-2.5 rounded-xl disabled:opacity-50 text-sm font-semibold inline-flex items-center gap-2 transition shadow-sm cursor-pointer ${
+                            editForm.status === 'Rejected'
+                              ? 'bg-rose-600 hover:bg-rose-500 text-white'
+                              : 'bg-accent hover:bg-accent-hover text-accent-text'
+                          }`}
+                        >
+                          <Save className="w-4 h-4" />
+                          <span>
+                            {saving
+                              ? 'Збереження...'
+                              : editForm.status === 'Rejected'
+                              ? 'Відхилити опитування'
+                              : 'Зберегти зміни'}
+                          </span>
+                        </button>
+                      </div>
+                    </form>
+
+                    {/* Секція модерації коментарів опитування */}
+                    <div className="pt-5 border-t border-line space-y-3">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2 text-xs sm:text-sm font-semibold text-main">
+                          <MessageSquare className="w-4 h-4 text-accent" />
+                          <span>Коментарі до опитування ({surveyComments.length})</span>
+                        </div>
+                      </div>
+
+                      {commentError && (
+                        <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-500 text-xs flex items-start gap-2">
+                          <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                          <span>{commentError}</span>
+                        </div>
+                      )}
+
+                      {isLoadingComments ? (
+                        <div className="space-y-2 animate-pulse">
+                          <div className="h-14 bg-card rounded-xl" />
+                          <div className="h-14 bg-card rounded-xl" />
+                        </div>
+                      ) : surveyComments.length === 0 ? (
+                        <p className="text-xs text-muted py-1">
+                          Коментарів до цього опитування немає.
+                        </p>
+                      ) : (
+                        <div className="space-y-2.5">
+                          {surveyComments.map((comment) => {
+                            const rootDeleteKey = `${survey.surveyId}-${comment.commentId}`;
+                            const isDeletingRoot = deletingCommentKey === rootDeleteKey;
+
+                            return (
+                              <div
+                                key={comment.commentId}
+                                className="p-3.5 rounded-xl bg-card border border-line space-y-2.5"
+                              >
+                                <div className="flex items-start justify-between gap-3">
+                                  <div className="min-w-0">
+                                    <span className="text-xs sm:text-sm font-semibold text-main">
+                                      {comment.nickname || 'Користувач'}
+                                    </span>
+                                    <span className="ml-2 text-[11px] text-muted">
+                                      #{comment.commentId} · {formatDisplayDate(comment.createdAt)}
+                                    </span>
+                                  </div>
+
+                                  <button
+                                    type="button"
+                                    disabled={deletingCommentKey !== null}
+                                    onClick={() =>
+                                      handleDeleteComment(survey.surveyId, comment.commentId)
+                                    }
+                                    title="Видалити коментар разом з відповідями"
+                                    className="px-2.5 py-1 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/25 text-rose-500 text-xs font-medium inline-flex items-center gap-1 transition cursor-pointer disabled:opacity-50 shrink-0"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                    <span>{isDeletingRoot ? 'Видалення...' : 'Видалити'}</span>
+                                  </button>
+                                </div>
+
+                                <p className="text-xs sm:text-sm text-main/90 whitespace-pre-wrap break-words">
+                                  {comment.text}
+                                </p>
+
+                                {/* Вкладені відповіді на коментар */}
+                                {Array.isArray(comment.replies) && comment.replies.length > 0 && (
+                                  <div className="pl-3 sm:pl-5 pt-1.5 space-y-2 border-l-2 border-line">
+                                    {comment.replies.map((reply) => {
+                                      const replyDeleteKey = `${survey.surveyId}-${comment.commentId}-${reply.replyId}`;
+                                      const isDeletingReply =
+                                        deletingCommentKey === replyDeleteKey;
+
+                                      return (
+                                        <div
+                                          key={reply.replyId}
+                                          className="p-2.5 rounded-lg bg-app/70 border border-line/60 space-y-1"
+                                        >
+                                          <div className="flex items-center justify-between gap-2">
+                                            <div className="flex items-center gap-1.5 min-w-0">
+                                              <CornerDownRight className="w-3 h-3 text-accent shrink-0" />
+                                              <span className="text-xs font-semibold text-main">
+                                                {reply.nickname || 'Користувач'}
+                                              </span>
+                                              <span className="text-[11px] text-muted">
+                                                #{reply.replyId} ·{' '}
+                                                {formatDisplayDate(reply.createdAt)}
+                                              </span>
+                                            </div>
+
+                                            <button
+                                              type="button"
+                                              disabled={deletingCommentKey !== null}
+                                              onClick={() =>
+                                                handleDeleteComment(
+                                                  survey.surveyId,
+                                                  comment.commentId,
+                                                  reply.replyId
+                                                )
+                                              }
+                                              title="Видалити відповідь"
+                                              className="px-2 py-0.5 rounded-md bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/25 text-rose-500 text-[11px] font-medium inline-flex items-center gap-1 transition cursor-pointer disabled:opacity-50 shrink-0"
+                                            >
+                                              <Trash2 className="w-3 h-3" />
+                                              <span>
+                                                {isDeletingReply ? '...' : 'Видалити'}
+                                              </span>
+                                            </button>
+                                          </div>
+
+                                          <p className="text-xs text-main/90 pl-4 whitespace-pre-wrap break-words">
+                                            {reply.text}
+                                          </p>
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
                     </div>
-                  </form>
+                  </div>
                 )}
               </article>
             );

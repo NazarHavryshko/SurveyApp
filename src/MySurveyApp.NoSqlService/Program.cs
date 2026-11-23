@@ -148,6 +148,21 @@ app.UseSwaggerUI(c =>
     c.RoutePrefix = string.Empty;
 });
 
+using (var scope = app.Services.CreateScope())
+{
+    var mongoDatabase = scope.ServiceProvider.GetRequiredService<IMongoDatabase>();
+    try
+    {
+        // Викликаємо метод ініціалізації індексів
+        await MongoIndexInitializer.InitializeIndexesAsync(mongoDatabase);
+        Console.WriteLine("MongoDB indexes were successfully initialized/verified.");
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"Error initializing MongoDB indexes: {ex.Message}");
+    }
+}
+
 // Автоматичне створення покриваючого індексу idx_fast_diagram_totals при запуску
 try
 {
